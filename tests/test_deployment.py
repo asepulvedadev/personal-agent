@@ -257,3 +257,25 @@ def test_failed_promotion_recovers_previous_release(tmp_path, monkeypatch):
 def test_clean_deployment_environment_can_resolve_trusted_firewall_utilities():
     assert '/usr/sbin' in load('release_gate').ENV['PATH'].split(':')
     assert '/sbin' in load('release_gate').ENV['PATH'].split(':')
+
+
+def test_archive_directories_remain_readable_under_private_administrator_umask(tmp_path):
+    import os
+    gate = load('release_gate')
+    parent_mode = tmp_path.stat().st_mode & 0o777
+    previous = os.umask(0o077)
+    try:
+        gate.extract_source(archive('app/static/app.js'), tmp_path / 'source', SHA)
+    finally:
+        os.umask(previous)
+    for directory in ('source', 'source/app', 'source/app/static'):
+        assert (tmp_path / directory).stat().st_mode & 0o777 == 0o755
+    assert (tmp_path / 'source/app/static/app.js').stat().st_mode & 0o777 == 0o644
+    assert tmp_path.stat().st_mode & 0o777 == parent_mode
+
+
+def test_web_health_includes_actual_static_asset_access():
+    import yaml
+    policy = yaml.safe_load(Path('compose.yaml').read_text())
+    command = policy['services']['web']['healthcheck']['test'][-1]
+    assert '/health' in command and '/static/app.js' in command

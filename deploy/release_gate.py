@@ -95,6 +95,11 @@ def extract_source(body, destination, sha):
                 with archive.extractfile(member) as source, target.open('xb') as out:
                     shutil.copyfileobj(source, out)
                 target.chmod(0o644)
+        # Host policy runs with umask 077. Normalize only public source directories;
+        # Docker COPY preserves nested modes and non-root image users need traversal.
+        for folder in [destination, *destination.rglob('*')]:
+            if folder.is_dir():
+                folder.chmod(0o755)
 
 
 class ReleaseGate:

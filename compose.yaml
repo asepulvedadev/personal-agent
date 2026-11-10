@@ -39,7 +39,7 @@ services:
       runtime: {ipv4_address: 172.30.40.3}
       front: {ipv4_address: 172.30.42.2, aliases: [personal-agent-web]}
     healthcheck:
-      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health",timeout=3)']
+      test: ['CMD', 'python', '-c', 'import urllib.request; [urllib.request.urlopen("http://127.0.0.1:8080"+p,timeout=3).close() for p in ("/health","/static/app.js")]']
       interval: 30s
       timeout: 5s
       retries: 3
