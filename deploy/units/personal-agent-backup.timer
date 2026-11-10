@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily backup of the isolated personal workspace
+[Timer]
+OnCalendar=*-*-* 04:15:00 America/Bogota
+RandomizedDelaySec=5m
+Persistent=true
+[Install]
+WantedBy=timers.target

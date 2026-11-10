@@ -1,0 +1,14 @@
+**
+!app/
+!app/**
+!runtime/
+!runtime/**
+!deploy/
+!deploy/**
+!requirements.txt
+!Dockerfile
+
+!requirements.lock
+
+!skills/
+!skills/**

@@ -1,0 +1,9 @@
+[Unit]
+Description=Personal workspace network guards before Docker startup
+Before=docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /srv/personal-agent/current/deploy/network-guard.sh
+[Install]
+WantedBy=multi-user.target

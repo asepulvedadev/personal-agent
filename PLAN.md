@@ -2,8 +2,8 @@
 
 Build one private assistant for Álvaro Sepúlveda Vélez's web development, marketing, and AI work. Run Hermes Agent on one VPS and access it through a minimal web chat and a private Telegram bot. Start with a useful assistant, not an agency platform.
 
-**Status:** planning only; no application, VPS deployment, or integrations implemented.
-**Date:** November 9, 2026. **Repository:** [asepulvedadev/personal-agent](https://github.com/asepulvedadev/personal-agent), private. Repository creation and plan upload were authorized by Álvaro.
+**Status:** historical initial plan. The isolated Web deployment is live; see `docs/DELIVERY.md` for current workspace, quarantine and CI/CD implementation status.
+**Date:** November 9, 2026. **Repository:** [asepulvedadev/personal-agent](https://github.com/asepulvedadev/personal-agent), public (verified November 10, 2026). Repository creation and plan upload were authorized by Álvaro.
 
 ## 1. The decision in one minute
 
@@ -50,7 +50,7 @@ Use Hermes' native Telegram integration, not a custom bot implementation. Create
 
 ### One identity does not mean one live transcript
 
-Both channels should use the same Hermes profile and project sources. Keep channel conversations separate initially: do not promise that a web conversation and a Telegram chat automatically become the same thread.
+The updated owner decision uses separate Hermes Web and Carpediev identities/profiles with shared versioned project sources, not shared live memories. Keep channel conversations separate initially: do not promise that a web conversation and a Telegram chat automatically become the same thread.
 
 Native memory is curated and bounded; its snapshot is loaded at session start. A fact saved in one conversation may require a fresh session before it appears in another. Explicitly test this behavior rather than describing it as instantaneous synchronization. [Persistent memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory)
 
@@ -160,7 +160,7 @@ Confirm these progressively, not through a long setup questionnaire:
 4. Telegram bot token and Álvaro's numeric user ID, never committed or pasted into the plan.
 5. Approval of private-network web access and one real project to validate the assistant.
 
-The present request authorizes the plan and repository creation, not VPS provisioning, account purchases, deployment, or production integration. Ask only for the next consequential missing decision.
+This was the initial planning-only scope. Subsequent owner requests authorized the isolated VPS deployment, project workspace, GitHub integration, scoped continuous delivery and quarantine-first skill intake. See `docs/DELIVERY.md` for current verified status and remaining gates; account purchases and unrelated applications remain outside scope.
 
 ## 12. Evidence and next action
 

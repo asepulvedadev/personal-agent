@@ -1,0 +1,28 @@
+FROM node:24-bookworm-slim@sha256:c0a93797ee78814ae6d32fcca2561fdbbe423149c3f5389aad32d86e9fd85bd4 AS node
+FROM ghcr.io/astral-sh/uv:0.11.8@sha256:5cbec7ab7753a6c763c6dda6a38f085c8c585ec9f53cfb4e7368b79ca30bc881 AS uv
+FROM python:3.14-slim-bookworm@sha256:1faf2343e747208b2a36e5f2b5ff908ec3b2d0078a6a7bfe73b535698fe83909
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never TZ=America/Bogota
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git ripgrep procps build-essential && rm -rf /var/lib/apt/lists/*
+# Official GitHub CLI release; both supported architecture archives are checksum-pinned.
+ARG TARGETARCH
+RUN case "$TARGETARCH" in amd64) sum=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60 ;; arm64) sum=06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909 ;; *) exit 1 ;; esac && curl -fsSL "https://github.com/cli/cli/releases/download/v2.96.0/gh_2.96.0_linux_${TARGETARCH}.tar.gz" -o /tmp/gh.tar.gz && echo "$sum  /tmp/gh.tar.gz" | sha256sum -c - && tar -xzf /tmp/gh.tar.gz -C /tmp && install -m 0755 "/tmp/gh_2.96.0_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh && gh --version && rm -rf /tmp/gh_2.96.0_linux_* /tmp/gh.tar.gz
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+COPY --from=uv /uv /usr/local/bin/uv
+ARG HERMES_COMMIT=3b421578588243f920886e6fe79a6faa87ea026e
+RUN curl -fsSL "https://codeload.github.com/NousResearch/hermes-agent/tar.gz/${HERMES_COMMIT}" -o /tmp/hermes.tar.gz && echo '2525046f165880c22f177f2214c8da3e26c58cb0aeab5bd09aad940556538897  /tmp/hermes.tar.gz' | sha256sum -c - && mkdir /opt/hermes && tar -xzf /tmp/hermes.tar.gz --strip-components=1 -C /opt/hermes && rm /tmp/hermes.tar.gz
+WORKDIR /opt/hermes
+RUN uv sync --frozen --no-dev --extra messaging --extra mcp && rm -rf /root/.cache/uv && useradd -u 10001 -M -s /usr/sbin/nologin agent
+COPY runtime/supervisor.py runtime/workspace_config.py /opt/runtime/
+COPY skills/ /opt/runtime/skills/
+RUN curl -fsSL https://sqlite.org/2026/sqlite-autoconf-3510300.tar.gz -o /tmp/sqlite.tar.gz && echo '81f5be397049b0cae1b167f2225af7646fc0f82e4a9b3c48c9ea3a533e21d77a  /tmp/sqlite.tar.gz' | sha256sum -c - && tar -xzf /tmp/sqlite.tar.gz -C /tmp && cd /tmp/sqlite-autoconf-3510300 && ./configure --prefix=/usr/local --disable-static --disable-readline && make -j2 && make install && ldconfig && python -c 'import sqlite3; assert sqlite3.sqlite_version_info >= (3,51,3)' && rm -rf /tmp/sqlite-autoconf-3510300 /tmp/sqlite.tar.gz
+COPY runtime/patch_history.py /opt/runtime/patch_history.py
+RUN python /opt/runtime/patch_history.py
+COPY runtime/patch_skills.py /opt/runtime/patch_skills.py
+RUN python /opt/runtime/patch_skills.py
+COPY runtime/quarantine_ingress.py runtime/patch_quarantine.py /opt/runtime/
+RUN python /opt/runtime/patch_quarantine.py /opt/hermes
+USER 10001:10001
+WORKDIR /workspace
+CMD ["/opt/hermes/.venv/bin/python", "/opt/runtime/supervisor.py"]

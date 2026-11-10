@@ -1,0 +1,105 @@
+name: personal-agent
+x-hardening: &hardening
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+services:
+  web:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    image: personal-agent-web:local
+    user: '10002:10002'
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 96
+    tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=64m']
+    environment:
+      PUBLIC_ORIGIN: https://alvaro.2.24.115.58.sslip.io
+      CONTROL_DIR: /control
+      RUNTIME_TOKEN_FILE: /run/runtime-auth/token
+      HERMES_TOKEN_FILE: /run/runtime-auth/hermes-token
+      QUARANTINE_INGEST_TOKEN_FILE: /run/runtime-auth/quarantine-token
+      BOOTSTRAP_PASSWORD_FILE: /run/portal-bootstrap/password
+      HERMES_URL: http://hermes:8642
+      HTTPS_PROXY: http://egress:3128
+    volumes:
+      - /srv/personal-agent/control:/control
+      - /srv/personal-agent/runtime-auth:/run/runtime-auth:ro
+      - /srv/personal-agent/portal-bootstrap:/run/portal-bootstrap:ro
+    networks:
+      runtime: {ipv4_address: 172.30.40.3}
+      front: {ipv4_address: 172.30.42.2, aliases: [personal-agent-web]}
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health",timeout=3)']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  hermes:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.hermes
+    image: personal-agent-hermes:v0.23.1
+    user: '10001:10001'
+    mem_limit: 2g
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 30s
+    tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=128m']
+    environment:
+      HERMES_HOME: /workspace/.hermes
+      QUARANTINE_INGEST_TOKEN_FILE: /run/runtime-auth/quarantine-token
+      QUARANTINE_OWNER_IDS: "7139153140"
+      QUARANTINE_BOT_ID: "9272502356"
+      QUARANTINE_TARGET_PROFILE: carpediev
+      QUARANTINE_BROKER_URL: http://web:8080
+      QUARANTINE_REVIEW_URL: https://alvaro.2.24.115.58.sslip.io/
+      HOME: /workspace/home
+      HTTP_PROXY: http://egress:3128
+      HTTPS_PROXY: http://egress:3128
+      NO_PROXY: web,hermes,127.0.0.1,localhost
+    volumes:
+      - /srv/personal-agent/workspace:/workspace
+      - /srv/personal-agent/runtime-auth:/run/runtime-auth:ro
+    networks:
+      runtime: {ipv4_address: 172.30.40.2}
+    depends_on:
+      web: {condition: service_healthy}
+      egress: {condition: service_started}
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request;urllib.request.build_opener(urllib.request.ProxyHandler({})).open("http://127.0.0.1:8642/health",timeout=4)']
+      interval: 30s
+      start_period: 120s
+      timeout: 6s
+      retries: 3
+  egress:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.egress
+    image: personal-agent-egress:local
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=32m', '/run:rw,noexec,nosuid,nodev,size=8m']
+    networks:
+      runtime: {ipv4_address: 172.30.40.4}
+      outbound: {ipv4_address: 172.30.41.2}
+networks:
+  runtime:
+    internal: true
+    ipam: {config: [{subnet: 172.30.40.0/28}]}
+  outbound:
+    ipam: {config: [{subnet: 172.30.41.0/28}]}
+  front:
+    internal: true
+    ipam: {config: [{subnet: 172.30.42.0/28}]}

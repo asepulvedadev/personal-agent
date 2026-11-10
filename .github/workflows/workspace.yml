@@ -1,0 +1,86 @@
+name: Workspace CI and project deployment
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy current main, or roll back to a previously accepted commit
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+        required: true
+      sha:
+        description: Exact lowercase 40-character SHA (required for rollback; deploy defaults to this main commit)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install locked runtime and separate test dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install -r requirements-dev.txt
+      - name: Run offline Python and voice regression tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -m pytest tests -q -p no:cacheprovider --basetemp="$(mktemp -d)"
+          node --test tests/*.cjs
+
+  deploy:
+    needs: test
+    if: >-
+      github.repository == 'asepulvedadev/personal-agent' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment: production
+    concurrency:
+      group: personal-agent-production
+      cancel-in-progress: false
+    steps:
+      - name: Request restricted project rollout
+        env:
+          DEPLOY_KEY: ${{ secrets.PERSONAL_AGENT_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PERSONAL_AGENT_KNOWN_HOSTS }}
+          REQUESTED_SHA: ${{ inputs.sha }}
+          REQUESTED_OPERATION: ${{ inputs.operation }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          operation="${REQUESTED_OPERATION:-deploy}"
+          sha="${REQUESTED_SHA:-$WORKFLOW_SHA}"
+          [[ "$operation" == deploy || "$operation" == rollback ]]
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$operation" == rollback ]]; then [[ -n "$REQUESTED_SHA" ]]; fi
+          [[ -n "$DEPLOY_KEY" && -n "$KNOWN_HOSTS" ]]
+          directory="$(mktemp -d)"
+          trap 'rm -rf -- "$directory"' EXIT
+          chmod 700 "$directory"
+          printf '%s\n' "$DEPLOY_KEY" > "$directory/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$directory/known_hosts"
+          chmod 600 "$directory/key" "$directory/known_hosts"
+          unset DEPLOY_KEY KNOWN_HOSTS
+          ssh -T -i "$directory/key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$directory/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            personal-agent-deploy@2.24.115.58 "$operation $sha"

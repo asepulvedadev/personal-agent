@@ -1,0 +1,12 @@
+[Unit]
+Description=Private personal workspace backup
+After=personal-agent.service
+Requires=personal-agent.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/personal-agent/current/deploy/backup.py
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=384M
+CPUQuota=25%
+TimeoutStartSec=300

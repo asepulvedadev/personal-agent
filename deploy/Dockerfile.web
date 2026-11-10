@@ -1,0 +1,8 @@
+FROM python:3.14-slim-bookworm@sha256:1faf2343e747208b2a36e5f2b5ff908ec3b2d0078a6a7bfe73b535698fe83909
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=America/Bogota
+WORKDIR /opt/portal
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock && useradd -u 10002 -M -s /usr/sbin/nologin portal
+COPY app /opt/portal/app
+USER 10002:10002
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--limit-concurrency", "32", "--ws-max-size", "32768", "--ws-max-queue", "4", "--proxy-headers", "--forwarded-allow-ips", "172.30.42.3"]

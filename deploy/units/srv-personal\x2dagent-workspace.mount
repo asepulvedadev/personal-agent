@@ -1,0 +1,12 @@
+[Unit]
+Description=Personal agent bounded workspace
+Before=personal-agent.service
+
+[Mount]
+What=/srv/personal-agent/workspace.img
+Where=/srv/personal-agent/workspace
+Type=ext4
+Options=loop,nosuid,nodev
+
+[Install]
+WantedBy=multi-user.target

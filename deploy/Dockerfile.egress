@@ -1,0 +1,5 @@
+FROM debian:bookworm-slim@sha256:c67e92c8099ba22853ab4cfda7cfb494d253d6012ca82dee98ba8976772af018
+RUN apt-get update && apt-get install -y --no-install-recommends squid ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY deploy/squid.conf /etc/squid/squid.conf
+USER proxy
+CMD ["squid", "-N", "-f", "/etc/squid/squid.conf"]

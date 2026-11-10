@@ -1,0 +1,22 @@
+private/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.coverage
+runtime-data/
+*.pem
+*.key
+
+# Private assistant/runtime state is never application source.
+.atl/
+/workspace/
+/quarantine/
+/control/
+/runtime-auth/
+/portal-bootstrap/
+/deployment-state/
+/backups/

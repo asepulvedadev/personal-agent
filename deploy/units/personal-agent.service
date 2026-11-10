@@ -1,0 +1,18 @@
+[Unit]
+Description=Isolated personal Hermes workspace
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/personal-agent/workspace
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/personal-agent/current
+ExecStartPre=/usr/bin/docker compose create
+ExecStartPre=/bin/sh /srv/personal-agent/current/deploy/network-guard.sh
+ExecStart=/usr/bin/docker compose up -d --no-build
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=180
+TimeoutStopSec=90
+[Install]
+WantedBy=multi-user.target

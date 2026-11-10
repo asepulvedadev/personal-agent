@@ -1,0 +1,24 @@
+
+# personal-agent: isolated owner workspace
+alvaro.2.24.115.58.sslip.io {
+    encode zstd gzip
+    @private path /internal/* /provider/*
+    handle @private {
+        respond "Not found" 404
+    }
+    handle {
+        request_body {
+            max_size 11MB
+        }
+        reverse_proxy personal-agent-web:8080 {
+            flush_interval -1
+        }
+    }
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        Strict-Transport-Security "max-age=31536000"
+        X-Robots-Tag "noindex, nofollow"
+        -Server
+    }
+}
