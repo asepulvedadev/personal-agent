@@ -192,3 +192,46 @@ def test_real_native_sse_shape_passes_through_and_releases_lock(portal):
         assert not m.busy.locked()
     finally:
         m.app.state.internal=original
+
+
+def test_settings_shell_has_accessible_presence_and_owner_editor(portal):
+    from html.parser import HTMLParser
+
+    class Elements(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.nodes = {}
+            self.scripts = []
+            self.in_connection = False
+            self.connection_text = ''
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if attrs.get('id'):
+                self.nodes[attrs['id']] = (tag, attrs)
+            if tag == 'script':
+                self.scripts.append(attrs.get('src'))
+            if attrs.get('id') == 'connection':
+                self.in_connection = True
+
+        def handle_endtag(self, tag):
+            if tag == 'div':
+                self.in_connection = False
+
+        def handle_data(self, value):
+            if self.in_connection:
+                self.connection_text += value
+
+    _, client = portal
+    parser = Elements()
+    parser.feed(client.get('/').text)
+    assert parser.connection_text.strip() == ''
+    assert parser.nodes['connection'][1]['aria-label']
+    assert parser.nodes['config-open'][1]['aria-haspopup'] == 'dialog'
+    assert 'hidden' in parser.nodes['config-open'][1]
+    assert parser.nodes['config-dialog'][0] == 'dialog'
+    assert parser.nodes['config-dialog'][1]['aria-labelledby'] == 'config-title'
+    assert parser.nodes['config-content'][0] == 'textarea'
+    assert parser.nodes['config-content'][1]['spellcheck'] == 'false'
+    assert 'disabled' in parser.nodes['config-content'][1]
+    assert parser.scripts.index('/static/config-editor.js') < parser.scripts.index('/static/app.js')

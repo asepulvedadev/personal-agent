@@ -81,9 +81,13 @@ while not stopping:
                 raise
         if child is None or child.poll() is not None or desired_revision!=revision or imports_changed:
             stop_child()
-            conf=runtime_config(c['model'])
-            conf=prepare(HOME, conf, TOKEN)
             p=HOME/'config.yaml'
+            owner_config=None
+            if p.exists():
+                from ruamel.yaml import YAML
+                owner_config=YAML(typ='safe', pure=True).load(p.read_text())
+            conf=runtime_config(c['model'], owner_config=owner_config)
+            conf=prepare(HOME, conf, TOKEN)
             _write(p, json.dumps(conf,indent=2), replace=p.exists())
             env={**os.environ,**c.get('variables',{})}
             env.update({'HERMES_HOME':str(HOME),'HOME':'/workspace/home','OPENAI_API_KEY':TOKEN,

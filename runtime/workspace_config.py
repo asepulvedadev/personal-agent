@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 
 PROFILES = {'default', 'carpediev'}
@@ -29,11 +30,11 @@ def assistant_config():
     }
 
 
-def runtime_config(model: str) -> dict:
+def runtime_config(model: str, *, owner_config: dict | None = None) -> dict:
     """Generate project defaults while keeping all model calls on the private relay."""
     relay = {'provider': 'openai-api', 'api_mode': 'codex_responses',
              'base_url': 'http://web:8080/provider/v1', 'key_env': 'OPENAI_API_KEY'}
-    return {
+    config = {
         **assistant_config(),
         'model': {'default': model, **relay},
         'terminal': {'backend': 'local', 'cwd': '/workspace/projects/personal-agent', 'timeout': 180},
@@ -45,6 +46,24 @@ def runtime_config(model: str) -> dict:
         'compression': {'enabled': True, 'model': model, **relay},
         'title_generation': {'model': model, **relay},
     }
+    # Preserve only supported owner fields; never inherit provider/relay overrides.
+    if owner_config is not None:
+        if not isinstance(owner_config, dict):
+            raise ValueError('Owner configuration must be a mapping')
+        if 'mcp_servers' in owner_config:
+            if not isinstance(owner_config['mcp_servers'], dict):
+                raise ValueError('MCP servers must be a mapping')
+            config['mcp_servers'] = deepcopy(owner_config['mcp_servers'])
+        if owner_config.get('approvals', {}).get('mode') == 'off':
+            config['approvals']['mode'] = 'off'
+    if owner_config is not None:
+        try:
+            from .config_files import editable_values
+        except ImportError:
+            from config_files import editable_values
+        for section, values in editable_values(owner_config).items():
+            config.setdefault(section, {}).update(values)
+    return config
 
 
 def _directory(path: Path):
