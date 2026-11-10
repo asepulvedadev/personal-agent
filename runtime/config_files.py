@@ -268,11 +268,97 @@ class ConfigFiles:
             return {**self._snapshot(file_id, incoming), 'saved': True}
 
 
+PROFILE = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
+MARKERS = ('config.yaml', '.env', 'SOUL.md', 'profile.yaml', 'auth.json', 'state.db')
+
+
+class ProfileFiles:
+    """Immediate live native profiles only; no caller-supplied filesystem roots."""
+    def __init__(self, home):
+        self.home = Path(home).absolute()
+
+    def _names(self):
+        names = []
+        try:
+            with _directory(self.home / 'profiles') as profiles:
+                try:
+                    deleted = os.open('.deleted', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=profiles)
+                except FileNotFoundError:
+                    deleted = None
+                try:
+                    with os.scandir(profiles) as entries:
+                        for entry in entries:
+                            name = entry.name
+                            if name == 'default' or not PROFILE.fullmatch(name) or not entry.is_dir(follow_symlinks=False):
+                                continue
+                            if deleted is not None:
+                                try:
+                                    os.stat(name, dir_fd=deleted, follow_symlinks=False)
+                                    continue
+                                except FileNotFoundError:
+                                    pass
+                            try:
+                                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=profiles)
+                                try:
+                                    for marker in MARKERS:
+                                        try:
+                                            info = os.stat(marker, dir_fd=child, follow_symlinks=False)
+                                        except FileNotFoundError:
+                                            continue
+                                        if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+                                            names.append(name)
+                                            break
+                                finally:
+                                    os.close(child)
+                            except OSError:
+                                continue
+                            if len(names) > 64:
+                                raise ConfigError(503)
+                finally:
+                    if deleted is not None:
+                        os.close(deleted)
+        except FileNotFoundError:
+            return []
+        except OSError:
+            raise ConfigError(503) from None
+        return sorted(names)
+
+    def listing(self):
+        return {'profiles': [{'id': 'default', 'name': 'Hermes Web'},
+                *({'id': name, 'name': 'Carpediev' if name == 'carpediev' else name} for name in self._names())]}
+
+    def _editor(self, profile):
+        if not isinstance(profile, str) or not PROFILE.fullmatch(profile):
+            raise ConfigError(404)
+        if profile == 'default':
+            return ConfigFiles(self.home)
+        if profile not in self._names():
+            raise ConfigError(404)
+        return ConfigFiles(self.home / 'profiles' / profile)
+
+    def files(self, profile):
+        editor = self._editor(profile)
+        result = editor.listing()
+        if profile != 'default':
+            try:
+                with _directory(editor.home / 'memories'):
+                    pass
+            except OSError:
+                result = {'files': [f for f in result['files'] if f['id'] != 'user']}
+        return result
+
+    def read(self, profile, file_id):
+        return self._editor(profile).read(file_id)
+
+    def write(self, profile, file_id, content, revision):
+        return self._editor(profile).write(file_id, content, revision)
+
+
 def register_config_files(app, adapter):
     """Called once after upstream mirror registration, on the existing authenticated port."""
     from aiohttp import web
     # Capture the startup default home, never a request profile ContextVar.
-    editor = ConfigFiles(os.environ.get('HERMES_HOME', '/workspace/.hermes'))
+    editor = ProfileFiles(os.environ.get('HERMES_HOME', '/workspace/.hermes'))
 
     async def handler(request):
         if request.path.startswith('/p/'):
@@ -283,9 +369,15 @@ def register_config_files(app, adapter):
         if auth_error is not None:
             return auth_error
         try:
+            if request.path == '/api/settings/profiles':
+                return web.json_response(await asyncio.to_thread(editor.listing), headers={'Cache-Control': 'no-store'})
+            values = request.query.getall('profile', ['default'])
+            if len(values) != 1 or not PROFILE.fullmatch(values[0]):
+                raise ConfigError(404)
+            profile = values[0]
             file_id = request.match_info.get('file_id')
             if request.method == 'GET':
-                result = await asyncio.to_thread(editor.read, file_id) if file_id else editor.listing()
+                result = await asyncio.to_thread(editor.read, profile, file_id) if file_id else await asyncio.to_thread(editor.files, profile)
             else:
                 raw = bytearray()
                 async for chunk in request.content.iter_chunked(8192):
@@ -298,7 +390,7 @@ def register_config_files(app, adapter):
                     raise ConfigError() from None
                 if not isinstance(payload, dict) or set(payload) != {'content', 'revision'}:
                     raise ConfigError()
-                result = await asyncio.to_thread(editor.write, file_id, payload['content'], payload['revision'])
+                result = await asyncio.to_thread(editor.write, profile, file_id, payload['content'], payload['revision'])
             return web.json_response(result, headers={'Cache-Control': 'no-store'})
         except ConfigError as exc:
             messages = {409: 'El archivo cambió. Recárgalo antes de guardar.', 413: 'El archivo supera el tamaño permitido.', 404: 'Archivo no disponible.'}
@@ -306,6 +398,7 @@ def register_config_files(app, adapter):
         except Exception:
             return web.json_response({'detail': 'No se pudo acceder a la configuración.'}, status=503, headers={'Cache-Control': 'no-store'})
 
+    app.router.add_route('GET', '/api/settings/profiles', handler)
     app.router.add_route('GET', '/api/settings/files', handler)
     app.router.add_route('GET', '/api/settings/files/{file_id}', handler)
     app.router.add_route('PUT', '/api/settings/files/{file_id}', handler)
