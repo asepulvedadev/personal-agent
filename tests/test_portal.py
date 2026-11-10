@@ -188,7 +188,7 @@ def test_real_native_sse_shape_passes_through_and_releases_lock(portal):
     try:
         r=c.post('/api/chat',json={'session_id':'owner_'+'a'*32,'message':'hello'},headers=h)
         assert r.status_code==200
-        assert 'assistant.delta' in r.text and 'run.completed' in r.text
+        assert r.content == b'event: assistant.delta\ndata: {"run_id":"run_test","delta":"hello"}\n\nevent: run.completed\ndata: {"run_id":"run_test"}\n\n'
         assert not m.busy.locked()
     finally:
         m.app.state.internal=original
@@ -235,3 +235,43 @@ def test_settings_shell_has_accessible_presence_and_owner_editor(portal):
     assert parser.nodes['config-content'][1]['spellcheck'] == 'false'
     assert 'disabled' in parser.nodes['config-content'][1]
     assert parser.scripts.index('/static/config-editor.js') < parser.scripts.index('/static/app.js')
+
+
+@pytest.mark.parametrize('failure,code,status', [
+    ('connect', 'unavailable', 502), ('timeout', 'timeout', 504), ('read', 'disconnected', 200),
+    ('read_timeout', 'timeout', 200), ('protocol', 'disconnected', 200),
+])
+def test_chat_transport_errors_are_sanitized_and_release_lock(portal, failure, code, status):
+    import httpx
+    m,c=portal
+    h=login(c)
+    c.post('/api/vault',json={'openai_key':'test-key'},headers=h)
+    secret='sk-never-echo-me /private/config.env'
+    closed=[]
+    class BrokenStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'event: assistant.delta\ndata: {"delta":"Partial answer"}\n\n'
+            error = httpx.ReadTimeout if failure=='read_timeout' else httpx.RemoteProtocolError if failure=='protocol' else httpx.ReadError
+            raise error(secret)
+        async def aclose(self):
+            closed.append(True)
+    class Internal:
+        def build_request(self,*args,**kwargs):
+            return httpx.Request('POST','http://hermes:8642/chat')
+        async def send(self,req,**kwargs):
+            if failure=='connect': raise httpx.ConnectError(secret)
+            if failure=='timeout': raise httpx.ReadTimeout(secret)
+            return httpx.Response(200,stream=BrokenStream(),request=req)
+    original=m.app.state.internal
+    m.app.state.internal=Internal()
+    try:
+        r=c.post('/api/chat',json={'session_id':'owner_'+'a'*32,'message':'hello'},headers=h)
+        assert r.status_code==status
+        assert code in r.text
+        assert secret not in r.text and 'sk-never-echo-me' not in r.text
+        assert not m.busy.locked() and m.active_selection is None
+        if failure in {'read', 'read_timeout', 'protocol'}:
+            assert 'Partial answer' in r.text and 'event: error' in r.text
+            assert closed
+    finally:
+        m.app.state.internal=original
