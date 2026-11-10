@@ -41,3 +41,7 @@ Versioned skills live in `skills/`; deployment/quarantine skills were also insta
 3. Verify live owner-only quarantine endpoints, approval/revocation synchronization and existing Web behavior. Keep original private data, provider relay and other applications intact.
 4. Telegram guard image readiness does not migrate the existing local bot. Do not start a second poller or transfer its token without an explicit coordinated cutover. Report channel coverage separately.
 5. Complete the VPS runtime's own GitHub device authentication with the owner; never transfer the local broad OAuth token as a shortcut.
+
+## First Actions rollout correction
+
+Branch CI and main CI passed. The first production job (`42823344388`) failed before Compose activation: the sanitized host environment omitted `/usr/sbin`, so the trusted firewall helper could not resolve `iptables` or `iptables-restore`. Its single recovery attempt hit the same environment error; the previous Web/Hermes/proxy containers remained running and healthy and `current` stayed on the initial release. Native host lookup reproduced exit 127. Both release and service wrappers now use the fixed, administrator-owned standard paths including `/usr/sbin` and `/sbin`, without inheriting client PATH. New regression tests first failed then passed (58 scoped deployment/bootstrap tests). The host policy update and a fresh, observed rollout are required before claiming continuous delivery success.

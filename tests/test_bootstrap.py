@@ -292,3 +292,9 @@ def test_conflicting_marker_refused_before_mutation(tmp_path):
     with pytest.raises(ValueError):
         provision.install()
     assert not (tmp_path / 'etc/ssh/personal-agent-deploy.keys').exists()
+
+
+def test_service_environment_can_resolve_trusted_firewall_utilities():
+    service = load('service_gate')
+    assert '/usr/sbin' in service.ENV['PATH'].split(':')
+    assert '/sbin' in service.ENV['PATH'].split(':')

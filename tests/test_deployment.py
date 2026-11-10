@@ -252,3 +252,8 @@ def test_failed_promotion_recovers_previous_release(tmp_path, monkeypatch):
         release.deploy(SHA)
     assert attempts == [SHA, 'initial']
     assert (tmp_path / 'current').readlink() == Path('releases/initial')
+
+
+def test_clean_deployment_environment_can_resolve_trusted_firewall_utilities():
+    assert '/usr/sbin' in load('release_gate').ENV['PATH'].split(':')
+    assert '/sbin' in load('release_gate').ENV['PATH'].split(':')

@@ -26,7 +26,7 @@ SERVICES = ('web', 'hermes', 'egress')
 PRIVATE = {'.git', '.hg', '.svn', 'private', 'workspace', 'control', 'runtime-auth',
            'portal-bootstrap', 'quarantine', '__pycache__', '.pytest_cache', '.cache',
            'node_modules', '.venv', 'venv', 'backups', 'deploy-policy'}
-ENV = {'PATH': '/usr/bin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8'}
+ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8'}
 
 
 def valid_sha(value):

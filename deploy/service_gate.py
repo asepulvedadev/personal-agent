@@ -11,7 +11,7 @@ import sys
 
 ROOT = Path('/srv/personal-agent')
 OWNER = 0
-ENV = {'PATH': '/usr/bin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8'}
+ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8'}
 
 
 def trusted(path, directory=False):
