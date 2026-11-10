@@ -135,10 +135,11 @@ class ReleaseGate:
         return target
 
     def assert_main(self, sha):
-        result = json.loads(self.fetch(MAIN_URL, 16384))
-        obj = result.get('object') if isinstance(result, dict) else None
-        if (not isinstance(obj, dict) or result.get('ref') != 'refs/heads/main'
-                or obj.get('type') != 'commit' or obj.get('sha') != sha):
+        result = json.loads(self.fetch(MAIN_URL, 65536))
+        target = result.get('object') if isinstance(result, dict) else None
+        if (not isinstance(result, dict) or result.get('ref') != 'refs/heads/main'
+                or not isinstance(target, dict) or target.get('type') != 'commit'
+                or target.get('sha') != sha):
             raise ValueError('Deployment commit is not canonical current main')
 
     def evidence(self, action, label, outcome):
