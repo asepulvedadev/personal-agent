@@ -19,6 +19,7 @@ from app.media import register_media, attachment_message
 from app.quarantine import register_quarantine, approved_skills, enforce_chat_intake
 from app.models import CATALOG, selection, enforce_selection
 from app.skills import catalog as skill_catalog, requested as requested_skills
+from app.settings import register_settings
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 CONTROL = Path(os.getenv("CONTROL_DIR", "/control"))
@@ -599,3 +600,5 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 @app.get("/status")
 async def index():
     return FileResponse(STATIC / "index.html")
+
+register_settings(app, owner, csrf, body, lambda: HERMES, lambda: token("HERMES_TOKEN"))

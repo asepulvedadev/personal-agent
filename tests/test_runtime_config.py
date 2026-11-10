@@ -4,13 +4,14 @@ from pathlib import Path
 from runtime.workspace_config import runtime_config
 
 
-def generated_config(model):
+def generated_config(model, owner_config=None):
     tree = ast.parse(Path('runtime/supervisor.py').read_text())
     assignment = next(node for node in ast.walk(tree)
                       if isinstance(node, ast.Assign)
                       and any(isinstance(t, ast.Name) and t.id == 'conf' for t in node.targets))
     return eval(compile(ast.Expression(assignment.value), '<runtime-config>', 'eval'),
-                {'__builtins__': {}, 'runtime_config': runtime_config}, {'c': {'model': model}})
+                {'__builtins__': {}, 'runtime_config': runtime_config},
+                {'c': {'model': model}, 'owner_config': owner_config})
 
 
 def test_primary_and_auxiliary_routes_keep_responses_through_private_relay():
