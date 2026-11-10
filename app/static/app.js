@@ -4,7 +4,8 @@ let csrf='',sid='',runId='',running=false,removeVariables=new Set();
 let attachments=[],mediaBusy=false,voice=null;
 let modelSelection=null,modelChoices=[];
 let skillPicker=null;
-const configEditor=HermesConfigEditor.mount({document,api,icon});
+const configEditor=HermesConfigEditor.mount({document,api,icon,openOnClick:false});
+$('config-open').addEventListener('click',()=>{if(unavailable()){notice('Espera a que termine la operación antes de abrir Configuración.');return;}if(!discardDraft())return;configEditor.requestLeave(()=>{location.href='/settings';});});
 function connectionState(data){const state=HermesConfigEditor.connection(data),node=$('connection');node.dataset.state=state.state;node.setAttribute('aria-label',state.label);node.title=state.label;}
 const effortLabels={none:'Sin razonamiento',low:'Bajo',medium:'Medio',high:'Alto',xhigh:'Muy alto',max:'Máximo'};
 function notice(text){$('notice').textContent=text;$('notice').hidden=false;}

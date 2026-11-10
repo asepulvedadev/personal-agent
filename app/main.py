@@ -21,6 +21,9 @@ from app.quarantine_chat import events as quarantine_events
 from app.models import CATALOG, selection, enforce_selection
 from app.skills import catalog as skill_catalog, requested as requested_skills
 from app.settings import register_settings
+from app.integrations import register_integrations, managed_variables
+from app.customization import register_customization
+from app.specialist import register_specialist
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 CONTROL = Path(os.getenv("CONTROL_DIR", "/control"))
@@ -264,6 +267,8 @@ async def update_vault(request: Request):
         raise HTTPException(400, "El nombre de la variable está reservado o su valor es inválido.")
     if any(not isinstance(k, str) or not safe_name(k) for k in remove):
         raise HTTPException(400, "No se puede eliminar esa variable.")
+    if (set(variables) | set(remove)) & managed_variables(v):
+        raise HTTPException(409, 'Edita las variables de aplicaciones desde Integraciones.')
     if key:
         v["openai_key"] = key.strip()
     if payload.get("remove_openai") is True:
@@ -608,4 +613,12 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 async def index():
     return FileResponse(STATIC / "index.html")
 
+
+@app.get('/settings')
+async def settings_page():
+    return FileResponse(STATIC / 'settings.html')
+
 register_settings(app, owner, csrf, body, lambda: HERMES, lambda: token("HERMES_TOKEN"))
+register_integrations(app, owner, csrf, body, vault, save_vault, lambda: busy.locked())
+register_customization(app, owner, csrf, body, lambda: HERMES, lambda: token('HERMES_TOKEN'))
+register_specialist(app, owner, csrf, body, lambda: HERMES, lambda: token('HERMES_TOKEN'))

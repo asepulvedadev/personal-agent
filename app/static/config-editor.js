@@ -54,7 +54,7 @@
       async discard(){const action=state.pending;if(!action||state.phase==='saving')return;state.pending=null;state.content=state.baseline;if(action.kind==='close')close();else if(action.kind==='leave'){close();action.callback();}else if(action.kind==='profile')await loadProfile(action.profile);else await load(action.id||state.selected);}
     };
   }
-  function mount({document:doc,api,icon}){
+  function mount({document:doc,api,icon,openOnClick=true}){
     const $=id=>doc.getElementById(id),dialog=$('config-dialog'),editor=$('config-content'),opener=$('config-open');
     let renderedSelection=null,renderedProfiles='',focusAfterLoad=false,lastPhase='';
     const controller=create({
@@ -95,7 +95,7 @@
         lastPhase=state.pending?.kind||state.phase;
       }
     });
-    opener.addEventListener('click',()=>controller.open());
+    if(openOnClick)opener.addEventListener('click',()=>controller.open());
     $('config-profile').addEventListener('change',()=>{focusAfterLoad=true;controller.selectProfile($('config-profile').value);});
     editor.addEventListener('input',()=>controller.edit(editor.value));
     $('config-save').addEventListener('click',()=>controller.save());
