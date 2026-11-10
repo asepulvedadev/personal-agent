@@ -30,6 +30,13 @@ def load(name):
     return module
 
 
+def test_scheduled_backup_keeps_same_bounded_window_as_release_backup():
+    definition = load('bootstrap').UNITS['personal-agent-backup.service']
+    assert 'TimeoutStartSec=900\n' in definition
+    assert 'MemoryMax=384M\n' in definition
+    assert 'CPUQuota=25%\n' in definition
+
+
 def project(tmp_path):
     root = tmp_path / 'srv/personal-agent'
     (root / 'releases/initial').mkdir(parents=True)

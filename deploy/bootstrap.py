@@ -57,7 +57,7 @@ Nice=10
 IOSchedulingClass=idle
 MemoryMax=384M
 CPUQuota=25%
-TimeoutStartSec=360
+TimeoutStartSec=900
 ''',
     'personal-agent-backup.timer': '''[Unit]
 Description=Daily backup of the isolated personal workspace

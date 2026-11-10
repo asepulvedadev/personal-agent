@@ -225,7 +225,8 @@ class ReleaseGate:
         images = {s: {'image': f'personal-agent-{s}:{sha}'} for s in SERVICES}
         self.override(sha).write_text(json.dumps({'services': images}))
         self.compose(source, sha, 'build', '--pull')
-        self.command(['/usr/bin/python3', '-I', str(self.policy / 'backup.py')], timeout=360)
+        # Preserve the complete mandatory snapshot after workspace growth.
+        self.command(['/usr/bin/python3', '-I', str(self.policy / 'backup.py')], timeout=900)
         self.assert_main(sha)
         self.transition(source, 'deploy')
         self.evidence('deploy', sha, 'healthy')

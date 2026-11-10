@@ -130,6 +130,37 @@ def test_success_builds_then_promotes_and_reuses_images(tmp_path, monkeypatch):
     assert override['services']['web'] == {'image': f'personal-agent-web:{SHA}'}
 
 
+def test_complete_backup_has_fifteen_minutes_before_activation(tmp_path, monkeypatch):
+    _, release, calls = prepared(tmp_path)
+    original = release.run
+    deadlines = []
+    def observe(argv, **kwargs):
+        deadlines.append((argv, kwargs['timeout']))
+        return original(argv, **kwargs)
+    release.run = observe
+    monkeypatch.setattr(release, 'healthy', lambda *_: True)
+    release.deploy(SHA)
+    backup = next((argv, timeout) for argv, timeout in deadlines if argv[-1].endswith('/backup.py'))
+    assert backup[1] == 900
+    assert next(i for i, argv in enumerate(calls) if argv[-1].endswith('/backup.py')) < next(i for i, argv in enumerate(calls) if 'up' in argv)
+    assert next(timeout for argv, timeout in deadlines if 'build' in argv) == 600
+
+
+def test_backup_timeout_still_refuses_activation(tmp_path):
+    _, release, calls = prepared(tmp_path)
+    original = release.run
+    def timeout(argv, **kwargs):
+        if argv[-1].endswith('/backup.py'):
+            raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
+        return original(argv, **kwargs)
+    release.run = timeout
+    with pytest.raises(subprocess.TimeoutExpired):
+        release.deploy(SHA)
+    assert (tmp_path / 'current').readlink() == Path('releases/initial')
+    assert not release.record(SHA).exists()
+    assert not any('up' in argv for argv in calls)
+
+
 def test_build_failure_never_changes_running_release(tmp_path):
     gate, release, calls = prepared(tmp_path)
     original = release.run
