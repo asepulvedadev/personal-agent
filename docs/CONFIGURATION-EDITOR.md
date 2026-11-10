@@ -1,12 +1,14 @@
 # Owner configuration editor
 
-The Web chat exposes three logical files for the **default Hermes Web profile only**:
+The Web chat exposes a minimal agent selector and fixed logical files for the default
+Hermes Web profile and existing live named profiles:
 
 - `config.yaml`: an editable non-secret projection, not the complete raw file.
 - `SOUL.md`: the profile identity and instructions.
 - `USER.md`: the real file at `memories/USER.md`.
 
-This feature does not expose Carpediev, `.env`, authentication files, MCP credentials,
+Carpediev uses its real VPS profile, not a copy from the local computer. This feature
+does not expose `.env`, authentication files, MCP credentials,
 agent memories, arbitrary paths, host files, or project files. It does not remove the
 owner's existing administrative grant. Credentials remain in the existing Secrets UI.
 
@@ -48,6 +50,23 @@ Owner-facing routes:
 - `PUT /api/settings/files/{id}` with exactly `{content, revision}`: updated snapshot
   including `saved: true`.
 
+`GET /api/settings/profiles` returns bounded `{profiles: [{id, name}]}` metadata.
+An optional `?profile=<id>` selects a profile on all fixed-file routes; omission retains
+existing default behavior. The selector reloads discovery every time the modal opens.
+Changing profiles requires explicit discard if a draft is dirty, blocks during saves,
+and ignores stale reads. A save is bound to the profile selected when it began.
+
+Discovery matches native lowercase/digit/hyphen/underscore IDs up to 64 characters,
+immediate non-symlink directories under the startup home's `profiles`, and a regular,
+non-hard-linked native identity marker (`config.yaml`, `.env`, `SOUL.md`, `profile.yaml`,
+`auth.json` or `state.db`). Marker contents are never read for discovery. Hidden partial
+profiles, markerless shells and `profiles/.deleted/<id>` tombstones are excluded. There
+is a bound of 64 named profiles plus default. Eligibility is rechecked for each operation;
+unknown/deleted IDs never fall back to default or create a directory. Only persistent
+profiles appear, not temporary delegated runs. No external host or local filesystem is
+searched. Named profiles without a safe `memories` directory do not offer USER.md; the
+editor never substitutes a root USER.md for the real `memories/USER.md`.
+
 IDs are exactly `config`, `soul`, and `user`. All reads require owner authentication;
 writes also require the existing same-origin CSRF token. Responses are not cached.
 The existing 65,536-byte Web request cap still applies. Text content has an additional
@@ -59,7 +78,8 @@ Hermes aiohttp listener**, after native profile-route mirroring. It requires a c
 nonempty native API key and calls the existing native authentication check before file
 I/O. There is no `/p/{profile}` editor mirror, additional port, host service, LLM-mediated
 file operation, shell command or Web workspace mount. The startup default `HERMES_HOME`
-is captured once; a request-time profile context cannot select another profile's files.
+is captured once; only the explicitly selected and validated profile ID changes the
+fixed file root, never a request-time profile ContextVar or arbitrary path.
 The build patch loads the fixed image-owned helper path, not a workspace import.
 
 ## Persistence and limits
@@ -95,3 +115,7 @@ repeated patch matches fail the image build. Production image dependencies are u
 Local implementation and tests do not establish a production rollout. The new helper
 requires a reviewed Hermes image rebuild and the Web changes require the established
 authorized delivery process. Neither a save nor local tests imply a deployment occurred.
+
+The profile selector does not change Telegram transport, tokens, routing, cron delivery,
+supervisor reconciliation or profile configuration regeneration. Existing Carpediev
+preparation already preserves its owner edits. No restart occurs when selecting a profile.
