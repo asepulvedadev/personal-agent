@@ -17,7 +17,7 @@ import urllib.request
 
 ROOT = Path('/srv/personal-agent')
 REPO = 'asepulvedadev/personal-agent'
-MAIN_URL = f'https://api.github.com/repos/{REPO}/commits/main'
+MAIN_URL = f'https://api.github.com/repos/{REPO}/git/ref/heads/main'
 MAX_DOWNLOAD = 32 * 1024**2
 MAX_EXPANDED = 128 * 1024**2
 MAX_FILE = 16 * 1024**2
@@ -136,7 +136,10 @@ class ReleaseGate:
 
     def assert_main(self, sha):
         result = json.loads(self.fetch(MAIN_URL, 65536))
-        if result.get('sha') != sha:
+        target = result.get('object') if isinstance(result, dict) else None
+        if (not isinstance(result, dict) or result.get('ref') != 'refs/heads/main'
+                or not isinstance(target, dict) or target.get('type') != 'commit'
+                or target.get('sha') != sha):
             raise ValueError('Deployment commit is not canonical current main')
 
     def evidence(self, action, label, outcome):

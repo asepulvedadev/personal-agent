@@ -20,6 +20,10 @@ SHA = 'a' * 40
 OLD = 'b' * 40
 
 
+def main_reference(sha):
+    return {'ref': 'refs/heads/main', 'object': {'type': 'commit', 'sha': sha}}
+
+
 def archive(name='app/main.py', kind=tarfile.REGTYPE, payload=b'pass\n', size=None):
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode='w:gz') as bundle:
@@ -86,7 +90,7 @@ def prepared(tmp_path):
     def run(argv, **kwargs):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout='[]')
-    release = gate.ReleaseGate(tmp_path, run=run, fetch=lambda url, limit: json.dumps({'sha': SHA}).encode() if 'api.github.com' in url else archive())
+    release = gate.ReleaseGate(tmp_path, run=run, fetch=lambda url, limit: json.dumps(main_reference(SHA)).encode() if 'api.github.com' in url else archive())
     return gate, release, calls
 
 
@@ -155,6 +159,44 @@ def test_download_rejects_redirects():
         gate.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://evil.example/')
 
 
+def test_main_identity_uses_compact_reference_without_increasing_download_cap(tmp_path, monkeypatch):
+    gate = load('release_gate')
+    compact = f'https://api.github.com/repos/{gate.REPO}/git/ref/heads/main'
+    requested = []
+
+    class Opener:
+        def open(self, request, timeout):
+            requested.append(request.full_url)
+            payload = main_reference(SHA) if request.full_url == compact else {
+                'sha': SHA, 'files': [{'patch': 'x' * 109089}]}
+            return io.BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr(gate.urllib.request, 'build_opener', lambda *handlers: Opener())
+    release = gate.ReleaseGate(tmp_path)
+    release.assert_main(SHA)
+    assert requested == [compact]
+    # The existing bound and redirect/URL policy still apply to identity reads.
+    with pytest.raises(ValueError, match='exceeds limit'):
+        gate.download(compact, 10)
+    with pytest.raises(ValueError, match='outside deployment policy'):
+        gate.download(f'https://api.github.com/repos/{gate.REPO}/commits/main', 65536)
+
+
+@pytest.mark.parametrize('payload', [[], {}, {'sha': SHA},
+    {'ref': 'refs/heads/other', 'object': {'type': 'commit', 'sha': SHA}},
+    {'ref': 'refs/heads/main', 'object': {'type': 'tag', 'sha': SHA}},
+    {'ref': 'refs/heads/main', 'object': None},
+    main_reference(OLD), main_reference('invalid')])
+def test_main_reference_rejects_wrong_identity_before_build(tmp_path, payload):
+    gate, release, calls = prepared(tmp_path)
+    release.fetch = lambda url, limit: json.dumps(payload).encode()
+    with pytest.raises(ValueError):
+        release.deploy(SHA)
+    assert calls == []
+    assert not (tmp_path / 'releases' / SHA).exists()
+    assert (tmp_path / 'current').readlink() == Path('releases/initial')
+
+
 def test_expansion_and_member_limits(tmp_path, monkeypatch):
     gate = load('release_gate')
     monkeypatch.setattr(gate, 'MAX_EXPANDED', 100)
@@ -200,7 +242,7 @@ def test_main_changes_during_build_blocks_activation(tmp_path):
     gate, release, calls = prepared(tmp_path)
     original = release.fetch
     reads = iter([SHA, OLD])
-    release.fetch = lambda url, limit: json.dumps({'sha': next(reads)}).encode() if url == gate.MAIN_URL else original(url, limit)
+    release.fetch = lambda url, limit: json.dumps(main_reference(next(reads))).encode() if url == gate.MAIN_URL else original(url, limit)
     with pytest.raises(ValueError):
         release.deploy(SHA)
     assert not any('up' in c for c in calls)
