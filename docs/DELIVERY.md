@@ -2,6 +2,16 @@
 
 Repository: `asepulvedadev/personal-agent` (public). Target: the existing personal-agent deployment on the explicitly authorized VPS, isolated from other applications. Do not version credentials, conversations, live memories, quarantine contents, or workspace data.
 
+## Shared chat release verified — November 10, 2026
+
+The [shared-chat production rollout](https://github.com/asepulvedadev/personal-agent/actions/runs/42851370782) succeeded for `f0fd46d63177fc8c4937a06ce2598536c9acb242`. Its merged source passed 265 Python tests and 26 Node tests. Web and Hermes reported healthy after activation; the Web module was publicly reachable and unauthenticated quarantine access returned 401.
+
+Actual owner-browser checks imported a harmless Markdown fixture through the ordinary Web attachment control and Telegram document attachment. Both returned bounded purpose, findings, usability and potential-benefit reports without activation. Web retrieved the receipt created in Telegram, and its display-only review history survived a reload. Existing configuration and skill-picker controls remained present; there is no separate quarantine button.
+
+The local transport was default-owned despite routing to Carpediev. With explicit owner authorization, exactly one graceful shared local gateway restart disconnected that bot after removing only its selected credential; all eight served profiles and their configuration/identity hashes were preserved. Only then was the selected credential provisioned over encrypted stdin on the VPS. The expected bot connected there, its owner message returned `Carpediev`, and no second profile token was introduced. The other 16 VPS containers were unchanged at the cutover checkpoint. Local histories and memories remain local and were not migrated.
+
+The trusted quarantine skill copies were updated only when byte-identical to their old canonical version. The clean persistent project checkout advanced by fast-forward. Imported fixtures remain unapproved evidence; these checks do not prove arbitrary packages harmless or establish automatic global installation. Earlier checkpoints below describe historical release stages, not current completion claims.
+
 ## Authorized outcomes
 
 1. Make `/workspace/projects/` the working root for versioned application projects; keep private Hermes state separate.
