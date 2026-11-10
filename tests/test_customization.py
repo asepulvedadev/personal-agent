@@ -16,7 +16,7 @@ SKILL = '---\nname: focus\ndescription: Focused owner assistance.\n---\n\nGive d
 def assets(tmp_path):
     home = tmp_path / 'home'
     (home / 'skills/builtin/builtin').mkdir(parents=True)
-    (home / 'skills/builtin/builtin/SKILL.md').write_text(SKILL)
+    (home / 'skills/builtin/builtin/SKILL.md').write_text(SKILL.replace('name: focus', 'name: builtin'))
     (home / 'profiles/carpediev').mkdir(parents=True)
     (home / 'profiles/carpediev/SOUL.md').write_text('Carpediev')
     return Customization(home), home
@@ -106,6 +106,12 @@ def test_native_auth_limits_and_cas(assets, monkeypatch):
             assert (await client.get(route + '&kind=plugin', headers=headers)).status == 400
             assert (await client.post(route, headers=headers, data=b'x' * 65537)).status == 413
             assert (await client.get('/p/carpediev/api/settings/customization', headers=headers)).status == 404
+            shared_route = '/api/settings/customization?scope=shared&kind=skill'
+            response = await client.post(shared_route, headers=headers, json={'id': 'focus', 'content': SKILL})
+            assert response.status == 200 and (await response.json())['id'] == 'shared:focus'
+            response = await client.get('/api/settings/customization?profile=carpediev&kind=skill', headers=headers)
+            assert (await response.json())['items'][0]['id'] == 'shared:focus'
+            assert (await client.get(shared_route + '&scope=profile', headers=headers)).status == 400
     asyncio.run(exercise())
 
 
@@ -179,3 +185,70 @@ assert custom.ConfigFiles is module.ConfigFiles
     assert result.returncode == 0, result.stderr
     assert INJECTION.count('_custom_module.register_customization(self._app, self)') == 1
     assert INJECTION.index('register_customization') > INJECTION.index('register_config_files')
+
+
+def test_shared_skills_use_one_source_for_current_and_future_profiles(assets):
+    store, home = assets
+    item = store.create('default', 'skill', 'focus', SKILL, scope='shared')
+    assert item['id'] == 'shared:focus' and item['editable'] and item['status'] == 'active'
+    assert (home / 'shared-skills/focus/SKILL.md').read_text() == SKILL
+    assert not (home / 'skills/owner-created/focus').exists()
+    for profile in ('default', 'carpediev'):
+        assert item['id'] in {v['id'] for v in store.listing(profile, 'skill')['items']}
+        assert store.read(profile, 'skill', item['id']) == item
+    future = home / 'profiles/future'
+    future.mkdir(); (future / 'SOUL.md').write_text('Future agent')
+    assert store.read('future', 'skill', item['id']) == item
+    updated = store.write('carpediev', 'skill', item['id'], SKILL + 'Stay concise.\n', item['revision'])
+    assert store.read('future', 'skill', item['id']) == updated
+    assert len(list((home / '.config-editor-backups').glob('customization-*.bak'))) == 1
+    with pytest.raises(ConfigError) as error:
+        store.write('default', 'skill', item['id'], SKILL, item['revision'], scope='shared')
+    assert error.value.status == 409
+    assert [v['id'] for v in store.listing('default', 'skill', scope='shared')['items']] == [item['id']]
+
+
+def test_shared_name_collisions_and_existing_profile_behavior(assets):
+    store, home = assets
+    alias = home / 'profiles/carpediev/skills/project/different-folder'
+    alias.mkdir(parents=True)
+    (alias / 'SKILL.md').write_text(SKILL)
+    with pytest.raises(ConfigError) as error:
+        store.create('default', 'skill', 'focus', SKILL, scope='shared')
+    assert error.value.status == 409 and not (home / 'shared-skills/focus/SKILL.md').exists()
+    item = store.create('default', 'skill', 'common', SKILL.replace('name: focus', 'name: common'), scope='shared')
+    with pytest.raises(ConfigError) as error:
+        store.create('carpediev', 'skill', 'common', item['content'])
+    assert error.value.status == 409
+    own = store.create('carpediev', 'skill', 'private', SKILL.replace('name: focus', 'name: private'))
+    assert own['id'] == 'owner:private'
+    assert own['id'] not in {v['id'] for v in store.listing('default', 'skill')['items']}
+    assert (alias / 'SKILL.md').read_text() == SKILL
+
+
+def test_shared_scope_never_promotes_imports_or_executable_drafts(assets):
+    store, home = assets
+    installed = store.listing('default', 'skill')['items'][0]
+    with pytest.raises(ConfigError):
+        store.read('default', 'skill', installed['id'], scope='shared')
+    for kind in ('tool', 'plugin', 'script'):
+        with pytest.raises(ConfigError): store.create('default', kind, 'focus', 'safe', scope='shared')
+    for scope in ('../shared', 'all'):
+        with pytest.raises(ConfigError): store.listing('default', 'skill', scope=scope)
+    (home / 'shared-skills').symlink_to(home / 'skills')
+    with pytest.raises(ConfigError): store.create('default', 'skill', 'focus', SKILL, scope='shared')
+    assert not (home / 'skills/focus').exists()
+
+
+def test_future_profile_collision_is_reported_without_changing_either_skill(assets):
+    store, home = assets
+    shared = store.create('default', 'skill', 'common', SKILL.replace('name: focus', 'name: common'), scope='shared')
+    folder = home / 'profiles/future/skills/owner-created/common'
+    folder.mkdir(parents=True)
+    (home / 'profiles/future/SOUL.md').write_text('Future')
+    private = shared['content'] + 'Private override.\n'
+    (folder / 'SKILL.md').write_text(private)
+    assert store.read('future', 'skill', shared['id'])['status'] == 'shadowed'
+    assert store.listing('default', 'skill', scope='shared')['items'][0]['status'] == 'shadowed'
+    assert (folder / 'SKILL.md').read_text() == private
+    assert (home / 'shared-skills/common/SKILL.md').read_text() == shared['content']

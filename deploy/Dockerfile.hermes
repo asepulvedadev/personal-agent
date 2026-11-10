@@ -21,6 +21,8 @@ COPY runtime/patch_history.py /opt/runtime/patch_history.py
 RUN python /opt/runtime/patch_history.py
 COPY runtime/patch_skills.py /opt/runtime/patch_skills.py
 RUN python /opt/runtime/patch_skills.py
+COPY runtime/patch_shared_skills.py runtime/shared_skills.py /opt/runtime/
+RUN python /opt/runtime/patch_shared_skills.py
 COPY runtime/patch_config_files.py /opt/runtime/patch_config_files.py
 RUN python /opt/runtime/patch_config_files.py
 COPY runtime/quarantine_ingress.py runtime/patch_quarantine.py /opt/runtime/

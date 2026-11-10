@@ -27,3 +27,9 @@ test('read-only installed asset cannot save or accept edits; close invalidates i
   const pending=Hub.createEditor({read:()=>new Promise(resolve=>finish=resolve),write:async()=>{}});
   const load=pending.load({id:'old'}); pending.clear(); finish(asset('old','x'));await load;assert.equal(pending.get().item,null);
 });
+
+test('shared picker maps to explicit skill scope, never a synthetic native profile',()=>{
+  assert.deepEqual(Hub.assetSelection('@shared','skill'),{scope:'shared',kind:'skill'});
+  assert.deepEqual(Hub.assetSelection('carpediev','skill'),{profile:'carpediev',kind:'skill'});
+  assert.deepEqual(Hub.assetSelection('carpediev','script'),{profile:'carpediev',kind:'script'});
+});

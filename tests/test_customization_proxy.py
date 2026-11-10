@@ -77,3 +77,17 @@ def test_creation_and_listing_contract(proxy):
     app.state.internal = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200,
         json={'items': [{k: v for k, v in ITEM.items() if k not in {'content', 'revision'}}], 'note': 'Drafts only.'})))
     assert client.get('/api/customization?kind=script', headers=headers).json()['items'][0]['name'] == 'sample'
+
+
+def test_shared_scope_is_owner_csrf_protected_and_forwarded(proxy):
+    app, client, requests = proxy
+    item = {**ITEM, 'id': 'shared:sample', 'kind': 'skill', 'status': 'active'}
+    app.state.internal = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: (requests.append(r) or httpx.Response(200, json=item))))
+    route = '/api/customization?scope=shared&kind=skill'
+    assert client.post(route, json={'id': 'sample', 'content': 'safe'}).status_code == 401
+    headers = {'Cookie': 'owner=yes', 'X-CSRF-Token': 'test-csrf'}
+    assert client.post(route, headers=headers, json={'id': 'sample', 'content': 'safe'}).json() == item
+    assert requests[-1].url.params['scope'] == 'shared'
+    assert client.get(route + '&scope=profile', headers=headers).status_code == 400
+    assert client.get(route.replace('shared', '../x'), headers=headers).status_code == 400
+    assert client.post(route.replace('skill', 'script'), headers=headers, json={'id': 'sample', 'content': 'safe'}).status_code == 400

@@ -11,11 +11,23 @@ The owner-authenticated settings hub exposes the selected live agent's skills an
 
 Skill frontmatter requires matching `name` and a nonempty `description`. Optional inert `metadata.hermes.category` and string-list `metadata.hermes.tags` are supported for existing trusted project skills. Hooks, executable frontmatter, custom YAML tags, aliases and duplicate keys are not supported. This is structural validation, not proof that natural-language instructions are safe or effective. The owner should review the content before saving an active skill.
 
+## Shared owner skills
+
+Select **Todos los agentes** in the skill picker to list, create or edit shared owner-authored skills. One canonical document lives at `shared-skills/<slug>/SKILL.md` under the runtime's fixed default home, outside all profile skill roots. It appears with a shared badge in each profile's inventory and is discoverable by Web, Carpediev, Configurador and future native profiles. Editing a shared row from any profile edits that same document, with CAS and a private backup; it does not create per-profile copies. Existing profile skills are not moved, promoted or overwritten. Imported and built-in read-only rows remain read-only; external packages still require quarantine.
+
+A build-only exact-seam patch appends the fixed `/workspace/.hermes/shared-skills` root to Hermes's native external search tier. It preserves project/local/create-dir precedence and ordinary per-profile skill creation. No arbitrary discovery path, symlink or OS permission expansion is introduced. Root substitution, links, hardlinks and oversized traversal fail closed. This is not an OS sandbox against agents sharing the runtime UID.
+
+Shared creation refuses directory-name and declared-frontmatter-name collisions in discovered profiles. Profile creation refuses existing shared names. If a later profile introduces a collision, the editor marks the shared entry **Conflicto de nombre** without modifying either document. Native profile/project/configured external roots keep their own precedence; a conflicting higher-priority skill can hide the shared one. No active conversation is rewritten: refresh discovery or start a new conversation to load changed instructions.
+
+The shared picker is only for skills; tools, plugins and scripts remain profile-specific inert drafts.
+
 ## API
 
 Portal endpoints use the existing owner cookie and require CSRF protection for writes:
 
 - `GET /api/customization?profile=default&kind=skill`
+- `GET /api/customization?scope=shared&kind=skill` lists shared skills only (omit `profile`, or use `default`). The optional scope defaults to `profile`; shared IDs also appear in profile skill lists.
+- `POST /api/customization?scope=shared&kind=skill` creates an owner-authored shared skill with the same payload schema. Item routes accept `shared:<slug>`; the canonical target does not depend on the selected profile.
 - `POST /api/customization?profile=default&kind=skill` with `{ "id": "my-skill", "content": "..." }`
 - `GET /api/customization/item?profile=default&kind=skill&id=OPAQUE_ID`
 - `PUT /api/customization/item?profile=default&kind=skill&id=OPAQUE_ID` with `{ "content": "...", "revision": "CURRENT_SHA256" }`
@@ -26,7 +38,7 @@ Listing responses contain `{ "items": [...], "note": "..." }`; each item has `id
 
 Text is limited to 32 KiB UTF-8 and rejects recognizable credential strings. Inventory is capped at 512 items, 2048 directories and ten path components; reaching a cap fails explicitly rather than silently truncating. Responses contain no raw configuration, credential files or host paths. Native errors are mapped to fixed portal messages.
 
-All filesystem traversal uses directory descriptors with no-follow opens. Symlink, hardlink and nonregular file content cannot be edited. Writes use a profile-local cooperative lock, content-hash compare-and-swap, private atomic replacement and the existing five-version private backup helper. A conflict returns HTTP 409 without replacing the target. Administrator/root writers can ignore the cooperative lock; the final reread narrows but cannot eliminate that threat model. No deletion endpoint is provided.
+All filesystem traversal uses directory descriptors with no-follow opens. Symlink, hardlink and nonregular file content cannot be edited. Writes use one default-home cooperative customization lock for both shared and profile operations, content-hash compare-and-swap, private atomic replacement and the existing five-version private backup helper. A conflict returns HTTP 409 without replacing the target. Administrator/root writers can ignore the cooperative lock; the final reread narrows but cannot eliminate that threat model. No deletion endpoint is provided.
 
 ## Verification
 

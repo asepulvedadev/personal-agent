@@ -19,7 +19,7 @@ except ModuleNotFoundError:
 
 KINDS = {'skill', 'tool', 'plugin', 'script'}
 SLUG = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
-ASSET_ID = re.compile(r'(?:owner|draft):[a-z0-9][a-z0-9_-]{0,63}\Z|installed:[a-f0-9]{64}\Z')
+ASSET_ID = re.compile(r'(?:owner|shared|draft):[a-z0-9][a-z0-9_-]{0,63}\Z|installed:[a-f0-9]{64}\Z')
 NOTE = ('Owner-created skills are active for this agent. Trusted project skills are editable; '
         'other installed skills are read-only. Tools, plugins and scripts are nonexecuted drafts. '
         'External imports must use chat quarantine; this editor does not approve or install imports.')
@@ -74,20 +74,27 @@ class Customization:
 
     @contextmanager
     def _locked(self, profile):
+        # Serialize profile and shared edits in one order, including name checks.
         editor = self.profiles._editor(profile)
         try:
-            with _directory(editor.home) as home:
-                lock = os.open('.customization.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=home)
+            with _directory(self.profiles.home) as root:
+                lock = os.open('.customization.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=root)
                 try:
                     info = os.fstat(lock)
                     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                         raise ConfigError()
                     fcntl.flock(lock, fcntl.LOCK_EX)
-                    yield editor, home
+                    with _directory(editor.home) as home:
+                        yield editor, home, root
                 finally:
                     os.close(lock)
         except OSError:
             raise ConfigError() from None
+
+    @staticmethod
+    def _scope(profile, kind, scope):
+        if scope not in {'profile', 'shared'} or (scope == 'shared' and (profile != 'default' or kind != 'skill')):
+            raise ConfigError()
 
     @staticmethod
     def _kind(kind):
@@ -154,56 +161,123 @@ class Customization:
             raise ConfigError(404)
         return {**self._public(item), 'content': _text(raw), 'revision': _digest(raw)}
 
-    def listing(self, profile, kind):
-        self._kind(kind)
-        with self._locked(profile) as (_, home):
-            return {'items': [self._public(v) for v in self._inventory(home, kind).values()], 'note': NOTE}
+    def _shared_inventory(self, root):
+        items = {}
+        try:
+            with _child(root, 'shared-skills') as folder:
+                if os.fstat(folder).st_mode & 0o022:
+                    raise ConfigError()
+                for slug in sorted(os.listdir(folder)):
+                    if not SLUG.fullmatch(slug):
+                        continue
+                    with _child(folder, slug) as skill:
+                        raw = _read(skill, 'SKILL.md', MAX_TEXT)
+                        if raw is None:
+                            continue
+                        if len(items) >= 512:
+                            raise ConfigError(503)
+                        items['shared:' + slug] = {'id': 'shared:' + slug, 'name': slug, 'kind': 'skill',
+                            'status': 'active', 'editable': True, '_parts': ('shared-skills', slug, 'SKILL.md')}
+        except FileNotFoundError:
+            pass
+        return items
 
-    def _lookup(self, home, kind, asset_id):
+    def _names(self, home, items):
+        names = set()
+        for item in items.values():
+            names.add(item['name'])
+            with self._asset(home, item['_parts']) as (parent, name):
+                raw = _read(parent, name, 262144)
+            if raw is None:
+                raise ConfigError(409)
+            try:
+                match = re.match(r'\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)', raw.decode('utf-8'), re.S)
+                metadata = yaml_load(match.group(1)) if match else {}
+                alias = metadata.get('name')
+                if isinstance(alias, str):
+                    names.add(alias)
+            except (UnicodeError, ConfigError):
+                raise ConfigError(503) from None
+        return names
+
+    def _all_profile_names(self):
+        names = set()
+        for profile in self.profiles.listing()['profiles']:
+            editor = self.profiles._editor(profile['id'])
+            with _directory(editor.home) as directory:
+                names.update(self._names(directory, self._inventory(directory, 'skill')))
+        return names
+
+    def _items(self, home, root, kind, scope):
+        local = self._inventory(home, kind) if scope == 'profile' else {}
+        if kind != 'skill':
+            return local
+        shared = self._shared_inventory(root)
+        if not shared:
+            return local
+        conflicts = self._all_profile_names() if scope == 'shared' else self._names(home, local)
+        for item in shared.values():
+            if item['name'] in conflicts:
+                item['status'] = 'shadowed'
+        if len(local) + len(shared) > 512:
+            raise ConfigError(503)
+        return {**local, **shared}
+
+    def listing(self, profile, kind, *, scope='profile'):
+        self._kind(kind); self._scope(profile, kind, scope)
+        with self._locked(profile) as (_, home, root):
+            return {'items': [self._public(v) for v in self._items(home, root, kind, scope).values()], 'note': NOTE}
+
+    def _lookup(self, home, root, kind, asset_id, scope):
         if not isinstance(asset_id, str) or not ASSET_ID.fullmatch(asset_id):
             raise ConfigError(404)
-        item = self._inventory(home, kind).get(asset_id)
+        item = self._items(home, root, kind, scope).get(asset_id)
         if item is None:
             raise ConfigError(404)
         return item
 
-    def read(self, profile, kind, asset_id):
-        self._kind(kind)
-        with self._locked(profile) as (_, home):
-            item = self._lookup(home, kind, asset_id)
-            with self._asset(home, item['_parts']) as (parent, name):
+    def read(self, profile, kind, asset_id, *, scope='profile'):
+        self._kind(kind); self._scope(profile, kind, scope)
+        with self._locked(profile) as (_, home, root):
+            item = self._lookup(home, root, kind, asset_id, scope)
+            target = root if asset_id.startswith('shared:') else home
+            with self._asset(target, item['_parts']) as (parent, name):
                 return self._snapshot(item, _read(parent, name, MAX_TEXT))
 
-    def create(self, profile, kind, slug, content):
-        self._kind(kind)
+    def create(self, profile, kind, slug, content, *, scope='profile'):
+        self._kind(kind); self._scope(profile, kind, scope)
         if not isinstance(slug, str) or not SLUG.fullmatch(slug):
             raise ConfigError()
         incoming = validate_content(kind, slug, content)
-        parts = ('skills', 'owner-created', slug, 'SKILL.md') if kind == 'skill' else ('.customization-drafts', kind, slug + '.txt')
-        item = {'id': ('owner:' if kind == 'skill' else 'draft:') + slug, 'name': slug,
+        parts = (('shared-skills', slug, 'SKILL.md') if scope == 'shared' else
+                 ('skills', 'owner-created', slug, 'SKILL.md')) if kind == 'skill' else ('.customization-drafts', kind, slug + '.txt')
+        item = {'id': ('shared:' if scope == 'shared' else 'owner:' if kind == 'skill' else 'draft:') + slug, 'name': slug,
                 'kind': kind, 'status': 'active' if kind == 'skill' else 'draft', 'editable': True, '_parts': parts}
-        with self._locked(profile) as (_, home):
-            current = self._inventory(home, kind)
+        with self._locked(profile) as (_, home, root):
+            current = self._items(home, root, kind, scope)
             if len(current) >= 512:
                 raise ConfigError(503)
             # Skill discovery names are global within a profile; refuse shadowing.
-            if any(v['name'] == slug for v in current.values()):
+            if any(v['name'] == slug for v in current.values()) or (scope == 'shared' and slug in self._all_profile_names()):
                 raise ConfigError(409)
-            with self._asset(home, parts, create=True) as (parent, name):
+            with self._asset(root if scope == 'shared' else home, parts, create=True) as (parent, name):
                 if _read(parent, name, MAX_TEXT) is not None:
                     raise ConfigError(409)
                 _atomic(parent, name, incoming)
                 return self._snapshot(item, incoming)
 
-    def write(self, profile, kind, asset_id, content, revision):
-        self._kind(kind)
+    def write(self, profile, kind, asset_id, content, revision, *, scope='profile'):
+        self._kind(kind); self._scope(profile, kind, scope)
         if not isinstance(revision, str) or not re.fullmatch(r'[a-f0-9]{64}|missing', revision):
             raise ConfigError()
-        with self._locked(profile) as (editor, home):
-            item = self._lookup(home, kind, asset_id)
+        with self._locked(profile) as (editor, home, root):
+            item = self._lookup(home, root, kind, asset_id, scope)
             if not item['editable']:
                 raise ConfigError(403)
             incoming = validate_content(kind, item['name'], content)
+            if asset_id.startswith('shared:'):
+                home = root
+                editor = ConfigFiles(self.profiles.home)
             with self._asset(home, item['_parts']) as (parent, name):
                 raw = _read(parent, name, MAX_TEXT)
                 self._snapshot(item, raw)
@@ -228,19 +302,19 @@ def register_customization(app, adapter):
             return auth_error
         try:
             query = {}
-            for key, default in [('profile', 'default'), ('kind', 'skill')]:
+            for key, default in [('profile', 'default'), ('kind', 'skill'), ('scope', 'profile')]:
                 values = request.query.getall(key, [default])
                 if len(values) != 1:
                     raise ConfigError()
                 query[key] = values[0]
             item_route = request.path.endswith('/item')
             ids = request.query.getall('id', [])
-            if (set(request.query) - {'profile', 'kind', 'id'} or (item_route and len(ids) != 1)
+            if (set(request.query) - {'profile', 'kind', 'scope', 'id'} or (item_route and len(ids) != 1)
                     or (not item_route and ids)):
                 raise ConfigError()
-            profile, kind = query['profile'], query['kind']
+            profile, kind, scope = query['profile'], query['kind'], query['scope']
             if request.method == 'GET':
-                result = await asyncio.to_thread(store.read, profile, kind, ids[0]) if item_route else await asyncio.to_thread(store.listing, profile, kind)
+                result = await asyncio.to_thread(store.read, profile, kind, ids[0], scope=scope) if item_route else await asyncio.to_thread(store.listing, profile, kind, scope=scope)
             else:
                 raw = bytearray()
                 async for chunk in request.content.iter_chunked(8192):
@@ -254,8 +328,8 @@ def register_customization(app, adapter):
                 keys = {'content', 'revision'} if item_route else {'id', 'content'}
                 if not isinstance(payload, dict) or set(payload) != keys:
                     raise ConfigError()
-                result = (await asyncio.to_thread(store.write, profile, kind, ids[0], payload['content'], payload['revision'])
-                          if item_route else await asyncio.to_thread(store.create, profile, kind, payload['id'], payload['content']))
+                result = (await asyncio.to_thread(store.write, profile, kind, ids[0], payload['content'], payload['revision'], scope=scope)
+                          if item_route else await asyncio.to_thread(store.create, profile, kind, payload['id'], payload['content'], scope=scope))
             return web.json_response(result, headers={'Cache-Control': 'no-store'})
         except ConfigError as error:
             notes = {409: 'El recurso cambió o ya existe. Recárgalo antes de guardar.', 413: 'El recurso supera el tamaño permitido.', 403: 'Este recurso es de solo lectura.'}

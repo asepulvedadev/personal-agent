@@ -6,7 +6,7 @@ import httpx
 from fastapi import HTTPException, Request
 
 PROFILE = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
-ASSET = re.compile(r'(?:owner|draft):[a-z0-9][a-z0-9_-]{0,63}\Z|installed:[a-f0-9]{64}\Z')
+ASSET = re.compile(r'(?:owner|shared|draft):[a-z0-9][a-z0-9_-]{0,63}\Z|installed:[a-f0-9]{64}\Z')
 KINDS = {'skill', 'tool', 'plugin', 'script'}
 MAX_TEXT = 32768
 MESSAGE = 'No se pudo acceder a las personalizaciones de Hermes.'
@@ -15,15 +15,17 @@ MESSAGE = 'No se pudo acceder a las personalizaciones de Hermes.'
 def register_customization(app, owner, csrf, body, native_url, native_token):
     def parameters(request, *, item=False):
         values = {}
-        allowed = {'profile', 'kind', 'id'} if item else {'profile', 'kind'}
+        allowed = {'profile', 'kind', 'scope', 'id'} if item else {'profile', 'kind', 'scope'}
         if set(request.query_params) - allowed:
             raise HTTPException(400, 'Recurso no permitido.')
-        for key, default in [('profile', 'default'), ('kind', 'skill'), *([('id', '')] if item else [])]:
+        for key, default in [('profile', 'default'), ('kind', 'skill'), ('scope', 'profile'), *([('id', '')] if item else [])]:
             candidates = request.query_params.getlist(key) or [default]
             if len(candidates) != 1:
                 raise HTTPException(400, 'Recurso no permitido.')
             values[key] = candidates[0]
-        if (not PROFILE.fullmatch(values['profile']) or values['kind'] not in KINDS
+        if (values['scope'] not in {'profile', 'shared'}
+                or (values['scope'] == 'shared' and (values['profile'] != 'default' or values['kind'] != 'skill'))
+                or not PROFILE.fullmatch(values['profile']) or values['kind'] not in KINDS
                 or (item and not ASSET.fullmatch(values['id']))):
             raise HTTPException(400, 'Recurso no permitido.')
         return values
@@ -35,9 +37,10 @@ def register_customization(app, owner, csrf, body, native_url, native_token):
                 or (expected_id is not None and value['id'] != expected_id)
                 or not isinstance(value['name'], str) or not PROFILE.fullmatch(value['name'])
                 or value['kind'] != kind or type(value['editable']) is not bool
-                or value['status'] not in ({'active', 'installed'} if kind == 'skill' else {'draft'})
+                or value['status'] not in ({'active', 'installed', 'shadowed'} if kind == 'skill' else {'draft'})
                 or (kind != 'skill' and not value['id'].startswith('draft:'))
-                or (kind == 'skill' and value['id'].startswith('draft:'))):
+                or (kind == 'skill' and value['id'].startswith('draft:'))
+                or (value['status'] == 'shadowed' and not value['id'].startswith('shared:'))):
             raise ValueError()
         if full and (not isinstance(value['content'], str) or len(value['content'].encode('utf-8')) > MAX_TEXT
                      or not isinstance(value['revision'], str) or not re.fullmatch(r'[a-f0-9]{64}', value['revision'])):
@@ -73,7 +76,7 @@ def register_customization(app, owner, csrf, body, native_url, native_token):
                     raise ValueError()
             else:
                 validate_asset(result, query['kind'], full=True, expected_id=(query.get('id') if item else
-                    ('owner:' if query['kind'] == 'skill' else 'draft:') + payload['id']))
+                    ('shared:' if query['scope'] == 'shared' else 'owner:' if query['kind'] == 'skill' else 'draft:') + payload['id']))
             return result
         except (httpx.HTTPError, ValueError, UnicodeError, TypeError, KeyError):
             raise HTTPException(502, MESSAGE) from None
