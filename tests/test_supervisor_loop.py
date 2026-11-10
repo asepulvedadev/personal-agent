@@ -3,11 +3,12 @@ import ast,hashlib,json,os,sys
 from pathlib import Path
 from types import SimpleNamespace as NS
 from runtime.workspace_config import sync_approved_skills,runtime_config
+from runtime.telegram_config import prepare, validate_transport
 
 SOURCE=Path('runtime/supervisor.py').read_text()
 LOOP=next(n for n in ast.parse(SOURCE).body if isinstance(n,ast.While))
 
-def simulate(tmp_path,snapshots):
+def simulate(tmp_path,snapshots,credentials=None):
     content='---\nname: imported-example\ndescription: A reviewed example.\n---\nUse supplied facts.\n'
     item={'name':'imported-example','profile':'default','content':content,'sha256':hashlib.sha256(content.encode()).hexdigest(),'source_sha256':'a'*64}
     home=tmp_path/'home';home.mkdir()
@@ -24,7 +25,8 @@ def simulate(tmp_path,snapshots):
         if scope['child'] is not None:calls.append('stop');scope['child']=None
     def spawn(*a,**kw):
         calls.append('start');envs.append(kw['env']);return NS(poll=lambda:None)
-    scope.update(config=config,stop_child=stop,subprocess=NS(Popen=spawn))
+    scope.update(config=config,stop_child=stop,subprocess=NS(Popen=spawn),hashlib=hashlib,
+                 bot_credential=lambda _:None if credentials is None else credentials[len(polls)-1],prepare=prepare,validate_transport=validate_transport)
     exec(compile(ast.Module(body=[LOOP],type_ignores=[]),'<supervisor-loop>','exec'),scope)
     return home,calls,envs
 
@@ -44,3 +46,13 @@ def test_missing_optional_approval_snapshot_does_not_revoke_imports(tmp_path):
     home,calls,envs=simulate(tmp_path,[lambda item:[item],lambda item:None])
     assert calls==['start']
     assert (home/'skills/approved-imports/imported-example/SKILL.md').exists()
+
+
+def test_token_file_change_restarts_one_transport_without_portal_revision_change(tmp_path):
+    token='9272502356:'+'x'*35
+    home,calls,envs=simulate(tmp_path,[lambda item:[],lambda item:[]],credentials=[None,token])
+    assert calls==['start','stop','start']
+    assert 'TELEGRAM_BOT_TOKEN' not in envs[0]
+    assert envs[1]['TELEGRAM_BOT_TOKEN']==token
+    assert envs[1]['TELEGRAM_ALLOWED_USERS']=='7139153140'
+    assert 'TELEGRAM_BOT_TOKEN' not in (home/'profiles/carpediev/.env').read_text()

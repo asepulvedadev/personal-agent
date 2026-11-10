@@ -5,7 +5,7 @@
 The trusted image-owned guard consumes import candidates before Hermes caches attachments,
 creates an agent event, or runs tools. It never installs a skill, executes uploaded content,
 approves activation, or forwards package instructions to the capable agent. Its only broker
-capability is quarantine ingestion. Owner approval remains a separate portal operation.
+capability is quarantine ingestion. Owner approval remains a separate owner-authenticated administrative operation; shared review does not activate skills.
 
 `runtime/patch_quarantine.py` verifies the exact SHA-256 of the Telegram adapter from upstream
 commit `3b421578588243f920886e6fe79a6faa87ea026e`, then inserts one fixed-path load of
@@ -94,9 +94,7 @@ Content-Type: application/octet-stream
 
 Success responses use HTTP 200/201 and an object with an opaque `id` (8–96 ASCII
 letters/digits/hyphens/underscores), a recognized `state`, and optional `findings` list/dict.
-Only the opaque ID, a fixed localized state label, finding count and configured owner
-review page are shown. No package instructions, snippets, filenames, arbitrary URLs,
-broker errors or suggested commands are reflected. The guard has no approve endpoint.
+Versioned shared assessments are rendered as bounded plain text (maximum 3,600 characters), including attributed package claims, findings, usability and conditional benefits. Legacy broker responses retain the opaque-receipt fallback. Raw package bodies, code snippets, arbitrary source URLs and broker errors are never reflected. Declared descriptions are normalized, URL-redacted, bounded and labeled untrusted. The guard has no approve endpoint.
 
 If an acknowledgement is uncertain, the owner is directed to inspect the portal before
 retrying. Rejected or failed candidates never fall back to the ordinary agent path.
@@ -116,3 +114,13 @@ route and broker authorization separately. Do not infer live delivery from offli
 ## Cross-component receipt regression
 
 The broker uses `review_required` for retained material requiring further review. Telegram accepts this exact state and renders only its fixed localized label, receipt ID and finding count. A regression passes a real broker summary to the receipt renderer; package text is never reflected. This offline check does not establish that the image patch or Telegram cutover is deployed.
+
+## Chat-first shared review and authorized cutover
+
+`cuarentena` and `ver skill RECEIPT_ID` are intercepted before ordinary agent dispatch, under the same exact bot/owner/private-chat checks as uploads. They call only fixed narrow GET report/list endpoints. Their reports are identical to Web assessments; no portal button or capable-agent review is involved.
+
+The VPS supervisor explicitly enables native multiplexing and routes the exact owner's DM on the default-owned Telegram transport to `carpediev`. Web's unprefixed API remains the default identity. Carpediev has its own configuration, SOUL, skills and internal relay credential; it must not receive a duplicate Telegram bot token in its own profile environment.
+
+Moving a live bot requires explicit owner authorization. First park/unserve **only** the local profile with `hermes -p carpediev gateway stop`, never `--all` or a shared-service restart. Require confirmed disconnection. Then provision the separately mounted root-managed `/run/runtime-auth/telegram-token` without displaying it. Only the expected bot ID is accepted; token-file changes restart the one container-owned gateway. There must never be two pollers. Do not copy local histories, memories, configuration or unrelated credentials.
+
+Deployment and offline tests alone do not prove a real Telegram exchange. Verify native routes/handler order, transport identity and owner authorization, absence of local polling, and a real owner chat separately. Preserve the local credential as a private rollback source; do not re-enable it while the VPS poller is active.

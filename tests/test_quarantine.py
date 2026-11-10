@@ -125,10 +125,10 @@ def test_approved_artifact_tampering_is_rejected(portal):
     assert approved_skills(m.CONTROL)==[]
 
 
-def test_quarantine_ui_separate_from_document_extraction(portal):
+def test_quarantine_chat_replaces_separate_dialog(portal):
     _,c=portal
     html=c.get('/').text
-    assert 'id="quarantine-dialog"' in html and 'id="quarantine-open"' in html
+    assert 'id="quarantine-dialog"' not in html and 'id="quarantine-open"' not in html
     assert 'No se ejecuta ni instala' in html
 
 
@@ -163,7 +163,7 @@ def test_document_route_refuses_skill_entrypoint_and_chat_attachment_uses_quaran
     assert c.post('/api/documents?name=SKILL.md',content=SAFE,headers=h).status_code==409
     assert c.post('/api/documents?name=notes.md',content=b'ordinary notes',headers=h).status_code==200
     script=c.get('/static/app.js').text
-    assert 'quarantine/upload?name=' in script and '/^skill\\.md$/i' in script
+    assert 'quarantine/upload?name=' in script and 'quarantine_id' in script
 
 
 def test_runtime_config_returns_only_approved_records(portal):
@@ -246,7 +246,7 @@ def test_same_profile_approval_cannot_replace_existing_skill(portal):
     ('Estudia esta skill', [{'name': 'SKILL.md', 'text': SAFE.decode()}]),
     ('Estudia este paquete', [{'name': 'skills.zip', 'text': 'arbitrary client supplied content'}]),
 ])
-def test_chat_api_cannot_forward_skill_candidates_around_quarantine(portal, message, attachments):
+def test_chat_api_cannot_forward_skill_candidates_around_quarantine(portal, message, attachments, monkeypatch):
     m, c = portal
     h = login(c)
     c.post('/api/vault', headers=h, json={'openai_key': 'synthetic-never-network'})
@@ -261,11 +261,15 @@ def test_chat_api_cannot_forward_skill_candidates_around_quarantine(portal, mess
         async def aclose(self):
             pass
     m.app.state.internal = RecordingAgent()
+    import app.quarantine_chat as chat_intake
+    async def source(url):
+        return SAFE, {'kind':'upload','filename':'SKILL.md'}
+    monkeypatch.setattr(chat_intake,'github_package',source)
     response = c.post('/api/chat', headers=h, json={
         'session_id': 'owner_' + 'a' * 32, 'message': message, 'attachments': attachments})
-    assert response.status_code == 409
+    assert response.status_code == (400 if attachments and attachments[0]['name'].endswith('.zip') else 200)
     assert seen == []
-    assert 'cuarentena' in response.json()['detail'].lower()
+    assert ('cuarentena' in response.text.lower()) if response.status_code==200 else 'ZIP' in response.json()['detail']
     assert not m.busy.locked()
 
 

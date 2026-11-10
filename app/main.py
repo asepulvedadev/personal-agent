@@ -16,7 +16,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from app.media import register_media, attachment_message
-from app.quarantine import register_quarantine, approved_skills, enforce_chat_intake
+from app.quarantine import register_quarantine, approved_skills
+from app.quarantine_chat import events as quarantine_events
 from app.models import CATALOG, selection, enforce_selection
 from app.skills import catalog as skill_catalog, requested as requested_skills
 from itsdangerous import BadSignature, URLSafeTimedSerializer
@@ -497,7 +498,9 @@ async def delete_session(request: Request, sid: str):
     if busy.locked():
         raise HTTPException(409, "Espera a que termine la respuesta antes de eliminar chats.")
     async with busy:
-        return await hermes("DELETE", "/api/sessions/" + sid)
+        result = await hermes("DELETE", "/api/sessions/" + sid)
+        app.state.quarantine_chat.forget(sid)
+        return result
 
 
 @app.delete("/api/sessions")
@@ -523,6 +526,7 @@ async def delete_history(request: Request):
         for sid in sorted(ids):
             try:
                 await hermes("DELETE", "/api/sessions/" + sid)
+                app.state.quarantine_chat.forget(sid)
                 deleted += 1
             except HTTPException as exc:
                 if exc.status_code == 404:
@@ -541,7 +545,10 @@ async def chat(request: Request):
     message = payload.get("message")
     if not isinstance(message, str) or not message.strip() or len(message) > 20000:
         raise HTTPException(400, "El mensaje debe tener entre 1 y 20.000 caracteres.")
-    enforce_chat_intake(message, payload.get('attachments', []))
+    quarantine_reply = await app.state.quarantine_chat.handle(sid, message, payload.get('attachments', []))
+    if quarantine_reply is not None:
+        return StreamingResponse(quarantine_events(quarantine_reply), media_type='text/event-stream',
+                                 headers={'X-Accel-Buffering':'no'})
     message = await requested_skills(message, hermes)
     message = attachment_message(message, payload.get('attachments', []))
     if not vault()["openai_key"]:

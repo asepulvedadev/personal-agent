@@ -17,35 +17,26 @@ frontmatter, external/code references and uncertain inputs stay in quarantine.
 The report includes a bounded review/reimplementation plan, not an automatic
 permission to create or execute everything in a package.
 
-## Owner Web workflow
+## Shared chat workflow
 
-Open **Cuarentena de skills** beside chat history. Upload ZIP, `SKILL.md`, Markdown
-or plaintext, or explicitly submit a public GitHub repository/path URL. ZIP and
-`SKILL.md` selected in the chat attachment picker are diverted here rather than
-sent as document text. The document API rejects `SKILL.md`; ordinary Markdown
-notes keep their existing document behavior. Ordinary GitHub discussions do not
-silently trigger downloads. Individual files named differently from `SKILL.md`
-are retained for review, not automatically converted into skills.
+Send a canonical GitHub skill/repository link or use the normal chat attachment clip for original ZIP or skill files. There is no separate quarantine toolbar button or dialog. Binary files first use the bounded owner-authenticated upload endpoint; chat receives an opaque receipt, not extracted package text. Explicit skill-file text from API clients is inspected as source, never forwarded to the capable agent. A string pretending to contain a ZIP is refused.
 
-- `POST /api/quarantine/upload?name=<filename>`: raw bytes, owner and CSRF.
-- `POST /api/quarantine/github`: JSON `{ "url": "https://github.com/owner/repo" }`,
-  owner and CSRF. `tree/<ref>/<path>` and Markdown/text `blob/<ref>/<path>` are
-  accepted. References containing `/` are deliberately unsupported.
-- `GET /api/quarantine` and `GET /api/quarantine/<id>`: owner-only reports.
-  Detail contains at most eight 4 KiB untrusted text previews. The UI uses
-  `textContent`, not HTML/Markdown rendering. No imported text enters chat or the
-  fully capable agent's system context.
-- `POST /api/quarantine/<id>/approve`: owner and CSRF; JSON
-  `{ "expected_sha256": "<source hash>", "profile": "default", "skill_path": "SKILL.md" }`.
-  Profiles are exactly `default` and `carpediev`.
+Trusted `/api/chat` interception precedes skill expansion, provider checks and agent execution. Reports explain the package's **unverified declared purpose**, observed structural/integrity/pattern findings, supported-format usability and conditional benefits. This is bounded static assessment, not an exhaustive security or effectiveness audit. No LLM with tools investigates the raw package.
 
-States are `quarantined`, `review_required`, `blocked` and `approved`. Only one
-self-contained `SKILL.md` with the narrow scalar `name`/`description` frontmatter
-and no findings can be explicitly approved. The owner must read the report.
-Approval creates exclusive `approved.json`, does not install or replace a live
-skill, and cannot change its profile afterward. Names already approved for the
-same profile are reserved; replacement needs a separate reviewed workflow.
-Protected security/configuration/identity names are refused.
+Both Hermes Web and Carpediev use the same Web-service-owned quarantine and the same versioned report schema. Type `cuarentena` for the ten most recent receipts, or `ver skill RECEIPT_ID` to review a receipt from either chat. Global review does **not** merge identities, conversations or memories, and does not install into either profile automatically.
+
+Web reports have a separate owner-only display transcript under `CONTROL_DIR/quarantine-chat/<owner-session>/`. They survive reload and merge chronologically with native history without changing native message offsets. They never enter Hermes model history. Each of at most 100 review conversations retains at most 100 report turns; full storage refuses new reports without silently deleting evidence. Existing confirmed chat deletion removes only that chat's display transcript, not quarantine evidence.
+
+### Interfaces and approval boundary
+
+- `POST /api/quarantine/upload?name=<filename>`: original bytes; owner + CSRF.
+- `POST /api/quarantine/github`: canonical public source URL; owner + CSRF.
+- `POST /api/chat`: link, skill text or attachment `{name, quarantine_id}`; owner + CSRF. Returns ordinary assistant-style SSE without invoking a model for quarantine requests.
+- `GET /api/quarantine/chat/<owner-session>`: owner-only display transcript.
+- `GET /api/quarantine` and `/api/quarantine/<id>`: existing owner-only inspection API. Detail previews remain explicitly untrusted; chat uses only the bounded assessment, never raw body previews.
+- Internal ingest, list and report endpoints require the dedicated narrow bearer credential and have **no approval authority**.
+
+Existing `POST /api/quarantine/<id>/approve` remains an owner + CSRF administrative interface with `{expected_sha256, profile, skill_path}`. Only one self-contained supported `SKILL.md` with no findings can receive immutable exact-hash approval. Profiles remain exactly `default` and `carpediev`. Chat review, a vague “yes”, an agent response, or the narrow ingest token does not approve anything. Replacements and shared installation require a separately reviewed owner workflow.
 
 ## Public GitHub handling
 
@@ -73,8 +64,7 @@ received archive bytes retain commit and path provenance even if analysis blocks
   or case-colliding paths, file/directory collisions, encrypted/special/symlink
   entries, nested archives, ambiguous names and corrupt CRCs are rejected.
 - There is no archive extraction to arbitrary filesystem paths (`extractall` is
-  never used). A single intake lock serializes Web/internal intake and approvals
-  in the single-process Web deployment.
+  never used). Synchronous evidence writes and quota checks contain no await points in the single-process Web deployment; route locks bound asynchronous intake and chat history operations.
 
 ## Trusted runtime read interface
 

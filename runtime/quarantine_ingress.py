@@ -90,6 +90,11 @@ def candidate_for_message(message):
         if extension in _ORDINARY_DOCUMENTS and not _INTAKE.search(text):
             return None
         return Candidate("upload" if extension in _UPLOAD_EXTENSIONS else "reject", name=name)
+    query = re.fullmatch(r'(?:/?(?:ver|revisar)\s+)?/?skill\s+([a-f0-9]{32})[.!]?', text.strip(), re.I)
+    if query:
+        return Candidate('review', url=query[1])
+    if re.fullmatch(r'/?(?:cuarentena|quarantine)(?:\s+(?:de\s+)?skills?)?[.!]?', text.strip(), re.I):
+        return Candidate('review', url='list')
     links = _GITHUB.findall(text)
     for entity in [*(getattr(message, "entities", None) or []), *(getattr(message, "caption_entities", None) or [])]:
         value = getattr(entity, "url", None)
@@ -164,10 +169,10 @@ class BrokerClient:
         self.config = config.validate()
         self.opener = opener or build_opener(ProxyHandler({}), _NoRedirect())
 
-    def _post(self, path, data, content_type):
+    def _post(self, path, data, content_type, method="POST"):
         if not path.startswith("/internal/quarantine/"):
             raise IntakeError("Invalid broker operation")
-        request = Request(self.config.origin.rstrip("/") + path, data=data, method="POST",
+        request = Request(self.config.origin.rstrip("/") + path, data=data, method=method,
                           headers={"Authorization": "Bearer " + self.config.token,
                                    "Content-Type": content_type, "Accept": "application/json"})
         with self.opener.open(request, timeout=20) as response:
@@ -180,6 +185,11 @@ class BrokerClient:
         if not isinstance(result, dict):
             raise IntakeError("Invalid broker metadata")
         return result
+
+    async def review(self, item_id):
+        if item_id != 'list' and not re.fullmatch(r'[a-f0-9]{32}', item_id):
+            raise IntakeError('Invalid review reference')
+        return await asyncio.wait_for(asyncio.to_thread(self._post, '/internal/quarantine/'+item_id, None, 'application/json', 'GET'), timeout=25)
 
     async def ingest_github(self, url, profile):
         data = json.dumps({"url": _safe_github_url(url), "profile": profile}).encode()
@@ -200,12 +210,24 @@ class _BoundedBuffer(io.BytesIO):
         return super().write(data)
 
 
+def _shared_report(result):
+    report = result.get('report')
+    if not isinstance(report, dict) or set(report) != {'version','scope','text'} or report.get('version') != 1 or report.get('scope') != 'shared':
+        raise IntakeError('Invalid shared assessment')
+    text = report.get('text')
+    if not isinstance(text,str) or not 1 <= len(text) <= 3600 or not text.startswith('Revisión compartida · Hermes Web y Carpediev\n') or any(ord(c)<32 and c!='\n' for c in text):
+        raise IntakeError('Invalid shared assessment text')
+    return text
+
+
 def receipt_text(result, config):
+    if result.get('kind') == 'quarantine-list' and set(result) == {'kind','report'}:
+        return _shared_report(result)
     item_id = result.get("id")
     if not isinstance(item_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,96}", item_id):
         raise IntakeError("Invalid quarantine receipt")
     state = result.get("state", "quarantined")
-    state_labels = {"quarantined": "en cuarentena", "rejected": "rechazado", "blocked": "bloqueado",
+    state_labels = {"approved": "aprobado; entrega no comprobada por esta revisión", "quarantined": "en cuarentena", "rejected": "rechazado", "blocked": "bloqueado",
                     "review_pending": "pendiente de revisión", "ready_for_review": "listo para revisión",
                     "pending": "pendiente", "scanned": "analizado", "needs_review": "requiere revisión",
                     "review_required": "requiere revisión"}
@@ -213,7 +235,9 @@ def receipt_text(result, config):
         raise IntakeError("Invalid quarantine state")
     findings = result.get("findings", [])
     count = len(findings) if isinstance(findings, (list, dict)) else 0
-    # Never reflect arbitrary report text, filenames, URLs, snippets or suggested commands.
+    if 'report' in result:
+        return _shared_report(result)
+    # Legacy summaries retain the narrow opaque-receipt fallback.
     reply = f"Recibido en cuarentena. Referencia: {item_id}. Estado: {state_labels[state]}. Hallazgos registrados: {count}. No se ha instalado ni ejecutado."
     if config.review_url:
         reply += " Revisa el informe en " + config.review_url
@@ -248,7 +272,9 @@ class QuarantineIngress:
             if not self._authorized(message, context):
                 return
             try:
-                if candidate.kind == "github":
+                if candidate.kind == "review":
+                    result = await self.broker.review(candidate.url)
+                elif candidate.kind == "github":
                     result = await self.broker.ingest_github(_safe_github_url(candidate.url), self.config.target_profile)
                 elif candidate.kind == "upload":
                     name = _safe_name(candidate.name)
@@ -267,7 +293,7 @@ class QuarantineIngress:
                     raise IntakeError("Unsupported or ambiguous import candidate")
                 reply = receipt_text(result, self.config)
             except Exception:
-                reply = "No pude confirmar el registro seguro de ese material. No se ha enviado al asistente ni instalado. Consulta la cuarentena del portal antes de volver a intentarlo."
+                reply = "No pude confirmar el registro seguro de ese material. No se ha enviado al asistente ni instalado. Escribe «cuarentena» para comprobar el registro antes de volver a enviarlo."
             try:
                 await asyncio.wait_for(message.reply_text(reply, disable_web_page_preview=True, parse_mode=None), timeout=10)
             except Exception:

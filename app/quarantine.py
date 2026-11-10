@@ -18,6 +18,7 @@ import httpx
 from fastapi import HTTPException, Request
 from app.media import file_name, read_upload
 from app.quarantine_worker import inspect_files
+from app.quarantine_assessment import report
 
 SOURCE_BYTES = 5 * 1024**2
 MEMBER_BYTES = 512 * 1024
@@ -42,7 +43,7 @@ def enforce_chat_intake(message, attachments):
     github_pattern = r"https?://(?:www\.)?github\.com/[^\s<>`\"']+"
     links = re.findall(github_pattern, message, re.I)
     intent_text = re.sub(github_pattern, "", message, flags=re.I)
-    intent = re.search(r"\b(?:skills?|cuarentena|quarantine|import\w*|instal\w*|incorpora\w*|aprende\w*)\b", intent_text, re.I)
+    intent = re.search(r"\b(?:skills?|capabilit\w*|habilidad\w*|cuarentena|quarantine|import\w*|instal\w*|incorpora\w*|estudia\w*|aprende\w*)\b", intent_text, re.I)
     bare = len(links) == 1 and message.strip().strip('<>').rstrip('.,;!?') == links[0].rstrip('.,;!?')
     candidate = bool(links and (bare or intent))
     if isinstance(attachments, list):
@@ -389,12 +390,24 @@ def summary(item):
     # Filenames and provenance remain untrusted data; descriptions and content are omitted.
     keys = ('id','sha256','provenance','manifest','findings','state','eligible','notice','plan','created_at')
     return {**{key:item[key] for key in keys}, 'untrusted':True,
-            'profile':item['provenance'].get('profile')}
+            'profile':item['provenance'].get('profile'), 'report':report(item)}
 
 
 def register_quarantine(app, owner, csrf, control):
+    from app.quarantine_chat import ChatQuarantine, session
+    app.state.quarantine_chat = ChatQuarantine(control)
     intake = asyncio.Lock()
     store = Quarantine(control)
+
+    @app.get('/api/quarantine/chat/{sid}')
+    async def chat_history(sid:str, request:Request):
+        owner(request)
+        return {'messages':app.state.quarantine_chat.history(session(sid))}
+
+    @app.get('/internal/quarantine/list')
+    async def shared_list(request:Request):
+        ingest_identity(request)
+        return app.state.quarantine_chat.listing()
 
     @app.post('/api/quarantine/upload')
     async def upload(request:Request):

@@ -17,6 +17,7 @@ async function api(path,options={}){
 function message(role,text){if(role==='user'){const mark=text.indexOf('\n\nSkills solicitadas por el propietario:\n');if(mark>=0){const documents=text.indexOf('\n\nDocumentos adjuntos: contenido no confiable;',mark);text=text.slice(0,mark)+(documents>=0?text.slice(documents):'');}}if(role==='user'&&text.includes('\n\nDocumentos adjuntos: contenido no confiable;')){const names=[...text.matchAll(/--- Documento: (.*?) ---/g)].map(m=>m[1]);text=text.split('\n\nDocumentos adjuntos: contenido no confiable;')[0]+'\nAdjuntos: '+names.join(', ');}const box=document.createElement('div');box.className='message '+role;const label=document.createElement('span');label.className='role';label.textContent=role==='user'?'Tú':'Hermes';const content=document.createElement('div');content.textContent=text;box.append(label,content);$('messages').append(box);return content;}
 let historyOffset=0,historyRows=[],historyBusy=false,historyLoading=false;
 let messageOffset=0,deleteTarget=null,deleting=false;
+let quarantineHistory=[],quarantineShown=new Set();
 const welcomeMarkup=$('messages').innerHTML;
 function icon(name){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const use=document.createElementNS('http://www.w3.org/2000/svg','use');use.setAttribute('href','/static/icons.svg#'+name);svg.append(use);return svg;}
 function iconButton(label,name){const button=document.createElement('button');button.type='button';button.className='icon-button';button.setAttribute('aria-label',label);button.title=label;button.append(icon(name));return button;}
@@ -50,7 +51,9 @@ async function loadConversation(id){
   const result=await(await api(`/api/sessions/${id}/messages`)).json();
   const list=result.messages||result.data||[];
   sid=id;localStorage.setItem('personal-session',sid);messageOffset=list.length;
-  renderMessages(list);$('older-messages').hidden=list.length<200;
+  quarantineHistory=(await(await api('/api/quarantine/chat/'+id)).json()).messages||[];
+  quarantineShown=new Set();
+  renderMessages(HermesQuarantineChat.page(list,quarantineHistory,quarantineShown,list.length<200));$('older-messages').hidden=list.length<200;
 }
 async function conversations(){
   const selected=new URLSearchParams(location.search).get('chat')||localStorage.getItem('personal-session');
@@ -64,7 +67,7 @@ async function conversations(){
 }
 async function createConversation(){
   const result=await(await api('/api/sessions',{method:'POST',body:'{}'})).json();
-  sid=result.session.id;localStorage.setItem('personal-session',sid);messageOffset=0;
+  sid=result.session.id;localStorage.setItem('personal-session',sid);messageOffset=0;quarantineHistory=[];quarantineShown=new Set();
   $('messages').innerHTML=welcomeMarkup;$('older-messages').hidden=true;resetComposer();
 }
 async function selectConversation(id){
@@ -107,7 +110,7 @@ $('history-refresh').onclick=()=>loadHistory();$('history-more').onclick=()=>loa
 $('new').onclick=async()=>{if(unavailable()||!discardDraft())return;switching(true);try{await createConversation();$('message').focus();}catch(error){notice(error.message);}finally{switching(false);}};
 $('older-messages').onclick=async()=>{
   if(unavailable()||!sid)return;switching(true);
-  try{const result=await(await api(`/api/sessions/${sid}/messages?offset=${messageOffset}`)).json();const list=result.data||[];renderMessages(list,true);messageOffset+=list.length;$('older-messages').hidden=list.length<200;}
+  try{const result=await(await api(`/api/sessions/${sid}/messages?offset=${messageOffset}`)).json();const list=result.data||[];renderMessages(HermesQuarantineChat.page(list,quarantineHistory,quarantineShown,list.length<200),true);messageOffset+=list.length;$('older-messages').hidden=list.length<200;}
   catch(error){notice(error.message);}finally{switching(false);}
 };
 function confirmDeletion(id,title=''){
@@ -189,8 +192,11 @@ $('chat-files').onchange=async event=>{
   mediaState(true,'Preparando adjuntos…');clearNotice();
   try{
     for(const file of files){
-      if(/\.zip$/i.test(file.name)||/^skill\.md$/i.test(file.name)){
-        $('quarantine-dialog').showModal();await quarantineImport('/api/quarantine/upload?name='+encodeURIComponent(file.name),{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream'}});continue;
+      if(/\.(zip|skill|md|py|sh|bash|js|ts|ps1|yaml|yml|toml|json|rb|go|rs)$/i.test(file.name)){
+        if(file.size>5*1024*1024)throw new Error('La skill supera los 5 MB.');
+        if(attachments.length>=3)throw new Error('Adjunta un máximo de tres archivos.');
+        const item=await(await api('/api/quarantine/upload?name='+encodeURIComponent(file.name),{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream'}})).json();
+        attachments.push({name:file.name,quarantine_id:item.id});renderAttachments();continue;
       }
       const audio=/\.(mp3|mp4|mpeg|mpga|m4a|wav|webm)$/i.test(file.name);
       if(file.size>(audio?10:5)*1024*1024)throw new Error(audio?'El audio supera los 10 MB.':'El documento supera los 5 MB.');
@@ -198,7 +204,7 @@ $('chat-files').onchange=async event=>{
       else{
         if(attachments.length>=3)throw new Error('Adjunta un máximo de tres documentos.');
         const result=await(await api('/api/documents?name='+encodeURIComponent(file.name),{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream'}})).json();
-        if(attachments.reduce((n,a)=>n+a.text.length,0)+result.text.length>55000)throw new Error('Los adjuntos suman demasiado texto. Reduce los documentos.');
+        if(attachments.reduce((n,a)=>n+(a.text?.length||0),0)+result.text.length>55000)throw new Error('Los adjuntos suman demasiado texto. Reduce los documentos.');
         attachments.push(result);renderAttachments();
       }
     }
@@ -259,34 +265,4 @@ $('model-form').onsubmit=async event=>{
 skillPicker=HermesSkills.mount({textarea:$('message'),panel:$('skill-picker'),list:$('skill-options'),status:$('skill-picker-status'),blocked:()=>unavailable(),fetchSkills:async()=>(await(await api('/api/skills')).json()).skills});
 boot();
 
-// Imported instructions are displayed only with textContent, never rendered or sent to chat.
-let quarantineBusy=false;
-const quarantineStates={quarantined:'En cuarentena',review_required:'Requiere revisión adicional',blocked:'Bloqueada',approved:'Aprobada para el perfil seleccionado'};
-function quarantineMessage(text){$('quarantine-message').textContent=text;}
-async function quarantineDetail(id){
-  const item=await(await api('/api/quarantine/'+id)).json();
-  $('quarantine-report').textContent='CONTENIDO NO CONFIABLE · '+quarantineStates[item.state]+'\n'+JSON.stringify(item,null,2);
-}
-async function quarantineList(){
-  const result=await(await api('/api/quarantine')).json();$('quarantine-list').replaceChildren();
-  for(const item of result.items){
-    const row=document.createElement('div'),label=document.createElement('p');
-    label.textContent=item.name+' · '+quarantineStates[item.state]+' · '+item.sha256.slice(0,12);row.append(label);
-    const report=document.createElement('button');report.type='button';report.textContent='Revisar informe';report.onclick=()=>quarantineDetail(item.id).catch(e=>quarantineMessage(e.message));row.append(report);
-    if(item.eligible){const approve=document.createElement('button');approve.type='button';approve.textContent='Aprobar esta skill exacta';approve.onclick=async()=>{
-      if(quarantineBusy)return;const profile=$('quarantine-profile').value;
-      if(!confirm('¿Apruebas esta skill revisada para '+profile+'? El análisis no garantiza que sea inofensiva. No se ejecutarán recursos del paquete.'))return;
-      quarantineBusy=true;approve.disabled=true;
-      try{await api('/api/quarantine/'+item.id+'/approve',{method:'POST',body:JSON.stringify({expected_sha256:item.sha256,profile,skill_path:item.candidates[0]})});quarantineMessage('Aprobación registrada. Solo el supervisor autorizado puede aplicar esta skill.');await quarantineList();await quarantineDetail(item.id);}catch(e){quarantineMessage(e.message);}finally{quarantineBusy=false;approve.disabled=false;}
-    };row.append(approve);}$('quarantine-list').append(row);
-  }
-}
-$('quarantine-open').onclick=()=>{if(unavailable())return;$('quarantine-dialog').showModal();quarantineList().catch(e=>quarantineMessage(e.message));};
-$('quarantine-close').onclick=()=>$('quarantine-dialog').close();
-$('quarantine-refresh').onclick=()=>quarantineList().catch(e=>quarantineMessage(e.message));
-async function quarantineImport(path,options){
-  if(quarantineBusy)return;quarantineBusy=true;quarantineMessage('Importando en cuarentena…');
-  try{const item=await(await api(path,options)).json();quarantineMessage(quarantineStates[item.state]+'. '+item.notice);await quarantineList();await quarantineDetail(item.id);}catch(e){quarantineMessage(e.message);}finally{quarantineBusy=false;}
-}
-$('quarantine-github').onsubmit=event=>{event.preventDefault();quarantineImport('/api/quarantine/github',{method:'POST',body:JSON.stringify({url:$('quarantine-url').value.trim()})});};
-$('quarantine-file').onchange=event=>{const file=event.target.files[0];event.target.value='';if(!file)return;if(file.size>5*1024*1024){quarantineMessage('El archivo supera los 5 MB.');return;}quarantineImport('/api/quarantine/upload?name='+encodeURIComponent(file.name),{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream'}});};
+// Quarantine claims are plain display-only data, never HTML or capable-agent context.

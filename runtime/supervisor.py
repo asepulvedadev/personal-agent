@@ -1,4 +1,5 @@
 """Owns only the Hermes child in this container; never accesses Docker or the host."""
+import hashlib
 import json
 import os
 import signal
@@ -7,6 +8,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+from telegram_config import bot_credential, prepare, validate_transport
 from workspace_config import install_identity, runtime_config, seed_skills, sync_approved_skills, _write
 
 WORKSPACE=Path('/workspace')
@@ -62,6 +64,13 @@ backoff=2
 while not stopping:
     try:
         c=config()
+        try:
+            telegram_token=bot_credential('/run/runtime-auth/telegram-token')
+            validate_transport(HOME, telegram_token)
+        except Exception:
+            stop_child()
+            raise
+        desired_revision=(c['revision'],hashlib.sha256(telegram_token.encode()).hexdigest() if telegram_token else None)
         imports_changed=0
         if 'approved_skills' in c:
             try:
@@ -70,9 +79,10 @@ while not stopping:
                 # Never keep a capable child running after failed approval reconciliation.
                 stop_child()
                 raise
-        if child is None or child.poll() is not None or c['revision']!=revision or imports_changed:
+        if child is None or child.poll() is not None or desired_revision!=revision or imports_changed:
             stop_child()
             conf=runtime_config(c['model'])
+            conf=prepare(HOME, conf, TOKEN)
             p=HOME/'config.yaml'
             _write(p, json.dumps(conf,indent=2), replace=p.exists())
             env={**os.environ,**c.get('variables',{})}
@@ -84,9 +94,12 @@ while not stopping:
                 'UV_CACHE_DIR':'/workspace/home/.cache/uv','XDG_CACHE_HOME':'/workspace/home/.cache',
                 'PYTHONDONTWRITEBYTECODE':'1'})
             env.pop('HERMES_YOLO_MODE', None)
+            env.pop('TELEGRAM_BOT_TOKEN', None)
+            if telegram_token:
+                env.update({'TELEGRAM_BOT_TOKEN':telegram_token,'TELEGRAM_ALLOWED_USERS':'7139153140'})
             print('Starting isolated Hermes runtime; configuration revision',c['revision'],flush=True)
             child=subprocess.Popen(['/opt/hermes/.venv/bin/hermes','gateway','run'],env=env,cwd=PROJECT,start_new_session=True)
-            revision=c['revision']
+            revision=desired_revision
             time.sleep(backoff)
             backoff=min(backoff*2,60) if child.poll() is not None else 2
         for _ in range(5):

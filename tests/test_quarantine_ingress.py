@@ -351,9 +351,40 @@ def test_actual_broker_review_required_summary_has_a_safe_receipt():
     item.update(id='a' * 32, created_at=1)
     reply = receipt_text(summary(item), CONFIG)
     assert 'requiere revisión' in reply
-    assert 'No se ha instalado ni ejecutado' in reply
+    assert 'Esta revisión no instala ni ejecuta contenido' in reply
     assert 'product facts' not in reply
 
 
 def test_ordinary_repository_question_does_not_infer_intent_from_url_path():
     assert candidate_for_message(message('¿Qué licencia usa https://github.com/acme/skills?')) is None
+
+
+def test_shared_chat_review_commands_never_reach_the_capable_agent():
+    from app.quarantine import analyze, summary
+    source=b'---\nname: copy-guide\ndescription: Draft neutral product descriptions from provided facts.\n---\nUse supplied facts.\n'
+    item,_=analyze(source,'SKILL.md',{'kind':'upload','profile':'default'})
+    item.update(id='a'*32,created_at=1)
+    class ReviewBroker(Broker):
+        async def review(self,reference):
+            self.calls.append(('review',reference))
+            return summary(item)
+    broker=ReviewBroker()
+    msg=message('ver skill '+'a'*32)
+    with pytest.raises(Stop):
+        run(msg,broker=broker)
+    assert broker.calls==[('review','a'*32)]
+    assert 'Hermes Web y Carpediev' in msg.replies[0]
+    assert 'Beneficios potenciales' in msg.replies[0]
+    assert 'Use supplied facts' not in msg.replies[0]
+    assert candidate_for_message(message('cuarentena')).kind=='review'
+    assert candidate_for_message(message('Hola, ¿cómo funciona una cuarentena?')) is None
+
+
+@pytest.mark.parametrize('report', [
+    {'version':1,'scope':'other','text':'arbitrary'},
+    {'version':1,'scope':'shared','text':'arbitrary'},
+    {'version':1,'scope':'shared','text':'Revisión compartida · Hermes Web y Carpediev\n'+'x'*4000},
+])
+def test_malformed_shared_assessment_is_refused(report):
+    with pytest.raises(IntakeError):
+        receipt_text({'id':'a'*32,'state':'quarantined','report':report},CONFIG)
