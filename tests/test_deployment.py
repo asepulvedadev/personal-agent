@@ -86,7 +86,7 @@ def prepared(tmp_path):
     def run(argv, **kwargs):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout='[]')
-    release = gate.ReleaseGate(tmp_path, run=run, fetch=lambda url, limit: json.dumps({'sha': SHA}).encode() if 'api.github.com' in url else archive())
+    release = gate.ReleaseGate(tmp_path, run=run, fetch=lambda url, limit: json.dumps({'ref':'refs/heads/main','object':{'type':'commit','sha':SHA}}).encode() if 'api.github.com' in url else archive())
     return gate, release, calls
 
 
@@ -200,7 +200,7 @@ def test_main_changes_during_build_blocks_activation(tmp_path):
     gate, release, calls = prepared(tmp_path)
     original = release.fetch
     reads = iter([SHA, OLD])
-    release.fetch = lambda url, limit: json.dumps({'sha': next(reads)}).encode() if url == gate.MAIN_URL else original(url, limit)
+    release.fetch = lambda url, limit: json.dumps({'ref':'refs/heads/main','object':{'type':'commit','sha':next(reads)}}).encode() if url == gate.MAIN_URL else original(url, limit)
     with pytest.raises(ValueError):
         release.deploy(SHA)
     assert not any('up' in c for c in calls)
@@ -279,3 +279,20 @@ def test_web_health_includes_actual_static_asset_access():
     policy = yaml.safe_load(Path('compose.yaml').read_text())
     command = policy['services']['web']['healthcheck']['test'][-1]
     assert '/health' in command and '/static/app.js' in command
+
+
+def test_canonical_main_uses_small_exact_git_reference_not_commit_diff(tmp_path):
+    gate=load('release_gate')
+    calls=[]
+    def fetch(url,limit):
+        calls.append((url,limit))
+        assert url=='https://api.github.com/repos/asepulvedadev/personal-agent/git/ref/heads/main'
+        return json.dumps({'ref':'refs/heads/main','object':{'type':'commit','sha':SHA}}).encode()
+    release=gate.ReleaseGate(tmp_path,fetch=fetch)
+    release.assert_main(SHA)
+    assert calls[0][1]<=16384
+    for result in ({'ref':'refs/tags/main','object':{'type':'commit','sha':SHA}},
+                   {'ref':'refs/heads/main','object':{'type':'tag','sha':SHA}},
+                   {'sha':SHA}):
+        release.fetch=lambda *_:json.dumps(result).encode()
+        with pytest.raises(ValueError):release.assert_main(SHA)
