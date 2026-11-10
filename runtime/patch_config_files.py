@@ -9,8 +9,16 @@ INJECTION = '''            # personal-agent: fixed default-profile configuration
             if _cf_spec is None or _cf_spec.loader is None:
                 raise RuntimeError("Image-owned configuration editor is unavailable")
             _cf_module = module_from_spec(_cf_spec)
+            import sys
+            sys.modules[_cf_spec.name] = _cf_module
             _cf_spec.loader.exec_module(_cf_module)
             _cf_module.register_config_files(self._app, self)
+            _custom_spec = spec_from_file_location("_personal_agent_customization", "/opt/runtime/customization.py")
+            if _custom_spec is None or _custom_spec.loader is None:
+                raise RuntimeError("Image-owned customization editor is unavailable")
+            _custom_module = module_from_spec(_custom_spec)
+            _custom_spec.loader.exec_module(_custom_module)
+            _custom_module.register_customization(self._app, self)
 '''
 
 
