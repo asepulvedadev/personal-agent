@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from telegram_config import bot_credential, prepare, validate_transport
-from workspace_config import install_identity, runtime_config, seed_skills, sync_approved_skills, _write
+from workspace_config import install_identity, runtime_config, seed_skills, sync_approved_skills, prepare_specialist, _write
 
 WORKSPACE=Path('/workspace')
 HOME=WORKSPACE/'.hermes'
@@ -55,7 +55,7 @@ HOME.mkdir(exist_ok=True,mode=0o700)
 (WORKSPACE/'projects').mkdir(exist_ok=True)
 PROJECT=WORKSPACE/'projects'/'personal-agent'
 PROJECT.mkdir(exist_ok=True)
-for profile in ('default', 'carpediev'):
+for profile in ('default', 'carpediev', 'app-config'):
     profile_home=HOME if profile=='default' else HOME/'profiles'/profile
     install_identity(profile_home, profile)
     seed_skills(profile_home, Path('/opt/runtime/skills'))
@@ -88,6 +88,7 @@ while not stopping:
                 owner_config=YAML(typ='safe', pure=True).load(p.read_text())
             conf=runtime_config(c['model'], owner_config=owner_config)
             conf=prepare(HOME, conf, TOKEN)
+            conf=prepare_specialist(HOME, conf, TOKEN, API_TOKEN)
             _write(p, json.dumps(conf,indent=2), replace=p.exists())
             env={**os.environ,**c.get('variables',{})}
             env.update({'HERMES_HOME':str(HOME),'HOME':'/workspace/home','OPENAI_API_KEY':TOKEN,

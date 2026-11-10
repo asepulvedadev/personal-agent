@@ -2,7 +2,7 @@
 import ast,hashlib,json,os,sys
 from pathlib import Path
 from types import SimpleNamespace as NS
-from runtime.workspace_config import sync_approved_skills,runtime_config
+from runtime.workspace_config import sync_approved_skills,runtime_config,prepare_specialist
 from runtime.telegram_config import prepare, validate_transport
 
 SOURCE=Path('runtime/supervisor.py').read_text()
@@ -26,7 +26,7 @@ def simulate(tmp_path,snapshots,credentials=None):
     def spawn(*a,**kw):
         calls.append('start');envs.append(kw['env']);return NS(poll=lambda:None)
     scope.update(config=config,stop_child=stop,subprocess=NS(Popen=spawn),hashlib=hashlib,
-                 bot_credential=lambda _:None if credentials is None else credentials[len(polls)-1],prepare=prepare,validate_transport=validate_transport)
+                 bot_credential=lambda _:None if credentials is None else credentials[len(polls)-1],prepare=prepare,prepare_specialist=prepare_specialist,validate_transport=validate_transport)
     exec(compile(ast.Module(body=[LOOP],type_ignores=[]),'<supervisor-loop>','exec'),scope)
     return home,calls,envs
 
