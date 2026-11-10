@@ -9,6 +9,7 @@ const ctx={HermesQuarantineChat:require('../app/static/quarantine-chat.js'),quar
  const offset=Number(path.match(/offset=(\d+)/)?.[1]||0);offsets.push(offset);return {async json(){return {data:persisted.slice(0,persisted.length-offset).slice(-200)};}};
 }};
 vm.createContext(ctx);
+vm.runInContext(src.slice(src.indexOf('function chatFailure('),src.indexOf('function renderMessages(')),ctx);
 vm.runInContext(src.slice(src.indexOf('async function loadConversation('),src.indexOf('async function conversations(')),ctx);
 vm.runInContext(src.slice(src.indexOf("$('older-messages').onclick="),src.indexOf('function confirmDeletion(')),ctx);
 vm.runInContext(src.slice(src.indexOf("$('chat-form').onsubmit="),src.indexOf('function renderAttachments(')),ctx);

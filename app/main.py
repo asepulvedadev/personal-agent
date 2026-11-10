@@ -567,15 +567,23 @@ async def chat(request: Request):
         if response.status_code >= 400:
             await response.aclose()
             raise HTTPException(502, "Hermes no aceptó el mensaje.")
-    except BaseException:
+    except BaseException as exc:
         active_selection=None
         busy.release()
+        if isinstance(exc, httpx.TimeoutException):
+            raise HTTPException(504, {"code": "timeout"}) from None
+        if isinstance(exc, httpx.RequestError):
+            raise HTTPException(502, {"code": "unavailable"}) from None
         raise
     async def stream():
         global active_selection
         try:
             async for chunk in response.aiter_bytes():
                 yield chunk
+        except httpx.RequestError as exc:
+            # Never expose transport exception strings, URLs, or upstream credentials.
+            code = "timeout" if isinstance(exc, httpx.TimeoutException) else "disconnected"
+            yield b"\n\nevent: error\ndata: " + json.dumps({"code": code}).encode() + b"\n\n"
         finally:
             try:
                 await response.aclose()

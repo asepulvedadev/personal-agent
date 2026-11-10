@@ -28,34 +28,88 @@ function navigationState(){for(const id of ['new','history-open','older-messages
 function switching(active){skillPicker?.close();historyBusy=active;for(const id of ['message','send','attach','mic','model-picker'])$(id).disabled=unavailable();navigationState();}
 function discardDraft(){return !($('message').value.trim()||attachments.length)||window.confirm('Hay un mensaje sin enviar. ¿Quieres descartarlo y cambiar de conversación?');}
 function resetComposer(){skillPicker?.close();attachments=[];renderAttachments();$('message').value='';clearNotice();}
-function renderMessages(list,prepend=false){
+// Error payloads are untrusted: only these local explanations enter the transcript.
+function chatFailure(code){
+  const explanations={
+    failed:'Hermes no pudo completar la respuesta. No se confirmó la causa. Revisa Estado antes de volver a intentarlo.',
+    cancelled:'La respuesta fue detenida. Puedes revisar lo recibido y enviar otro mensaje para continuar.',
+    empty:'Hermes terminó sin una respuesta visible. Revisa Estado y vuelve a intentarlo; no se confirmó la causa.',
+    disconnected:'La conexión terminó sin confirmar el resultado. Conserva lo recibido y recarga el historial antes de volver a intentarlo.',
+    protocol:'No se pudo interpretar la respuesta del agente. El resultado no está confirmado. Revisa Estado y recarga el historial antes de reintentar.',
+    timeout:'Se agotó el tiempo de espera del agente. El resultado no está confirmado. Revisa Estado y recarga el historial antes de reintentar.',
+    unavailable:'No se pudo establecer la conexión con el agente. Revisa Estado y recarga el historial antes de reintentar.',
+    unauthorized:'No se pudo enviar el mensaje con esta sesión. Vuelve a iniciar sesión y revisa el historial antes de reintentar.',
+    conflict:'No se pudo iniciar la respuesta. Revisa Estado y la configuración en Secretos; espera si hay otra respuesta en curso.',
+    missing:'No hay una respuesta final guardada para este turno. El resultado no está confirmado; revisa Estado antes de volver a intentarlo.'
+  };
+  return typeof code==='string'&&Object.hasOwn(explanations,code)?explanations[code]:explanations.failed;
+}
+async function readChatEvents(body,onEvent){
+  if(!body)throw new Error('Missing stream');
+  const reader=body.getReader(),decoder=new TextDecoder();
+  let buffer='',event='',data=[],stopped=false;
+  const dispatch=()=>{
+    if(!data.length){event='';return;}
+    const raw=data.join('\n');data=[];
+    if(raw==='[DONE]'){event='';return;}
+    let payload;
+    try{payload=JSON.parse(raw);if(!payload||typeof payload!=='object'||Array.isArray(payload))throw new Error('Invalid event');}
+    catch{onEvent('invalid',{});event='';return;}
+    stopped=onEvent(typeof payload.type==='string'?payload.type:event,payload)===true;event='';
+  };
+  const line=value=>{
+    if(!value){dispatch();return;}
+    if(value.startsWith('event:'))event=value.slice(6).trim();
+    else if(value.startsWith('data:'))data.push(value.slice(5).replace(/^ /,''));
+  };
+  try{
+    while(!stopped){
+      const {done,value}=await reader.read();buffer+=done?decoder.decode():decoder.decode(value,{stream:true});
+      let index;
+      while(!stopped&&(index=buffer.indexOf('\n'))>=0){line(buffer.slice(0,index).replace(/\r$/,''));buffer=buffer.slice(index+1);}
+      if(done){if(!stopped&&buffer)line(buffer.replace(/\r$/,''));if(!stopped)dispatch();break;}
+    }
+  }finally{try{await reader.cancel();}catch{/* A confirmed terminal event remains authoritative. */}}
+}
+function renderMessages(list,prepend=false,outcome=null){
   const previous=prepend?[...$('messages').children]:[];
   if(!prepend)$('messages').replaceChildren();
-  let trace=null;
+  let trace=null,pending=false,lastAnswer='';
   const finish=()=>{if(trace){trace.finish('history');trace=null;}};
   for(const m of list){
     if(m.display_kind==='hidden')continue;
-    if(m.role==='user')finish();
+    if(m.role==='user'){finish();if(pending)message('assistant',chatFailure('missing'));pending=true;lastAnswer='';}
     if((m.role==='assistant'&&m.tool_calls?.length)||m.role==='tool'){
+      pending=true;
       if(!trace)trace=HermesActivity.view($('messages'));
       trace.history(m);trace.render();
     }
     if(['user','assistant'].includes(m.role)){
       const text=typeof m.content==='string'?m.content:JSON.stringify(m.content||'');
-      if(text.trim())message(m.role,text);
+      if(text.trim()){
+        message(m.role,text);
+        if(m.role==='assistant'&&!m.tool_calls?.length){pending=false;lastAnswer=text;}
+      }
     }
   }
   finish();
+  if(!prepend){
+    if(outcome){
+      const partial=outcome.partial?.trim()&&!lastAnswer.includes(outcome.partial.trim())?outcome.partial:'';
+      const explanation=outcome.explanation||(partial?chatFailure('missing'):'');
+      if(partial||explanation)message('assistant',(partial?partial+'\n\n':'')+explanation);
+    }else if(pending)message('assistant',chatFailure('missing'));
+  }
   if(prepend)$('messages').append(...previous);
   if(!$('messages').children.length)$('messages').innerHTML=welcomeMarkup;
 }
-async function loadConversation(id){
+async function loadConversation(id,outcome=null){
   const result=await(await api(`/api/sessions/${id}/messages`)).json();
   const list=result.messages||result.data||[];
   sid=id;localStorage.setItem('personal-session',sid);messageOffset=list.length;
   quarantineHistory=(await(await api('/api/quarantine/chat/'+id)).json()).messages||[];
   quarantineShown=new Set();
-  renderMessages(HermesQuarantineChat.page(list,quarantineHistory,quarantineShown,list.length<200));$('older-messages').hidden=list.length<200;
+  renderMessages(HermesQuarantineChat.page(list,quarantineHistory,quarantineShown,list.length<200),false,outcome);$('older-messages').hidden=list.length<200;
 }
 async function conversations(){
   const selected=new URLSearchParams(location.search).get('chat')||localStorage.getItem('personal-session');
@@ -157,11 +211,44 @@ $('provider-check').onclick=async()=>{const button=$('provider-check');button.di
 $('refresh-status').onclick=()=>showStatus().catch(e=>notice(e.message));
 $('message').onkeydown=e=>{if(e.isComposing||skillPicker?.keydown(e))return;if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chat-form').requestSubmit();}};
 $('stop').onclick=async()=>{if(!runId)return;try{await api('/api/stop',{method:'POST',body:JSON.stringify({run_id:runId})});$('activity').textContent='Deteniendo…';}catch(e){notice(e.message);}};
-$('chat-form').onsubmit=async e=>{e.preventDefault();if(unavailable())return;skillPicker?.close();if(!sid){try{switching(true);const draft=$('message').value;const files=attachments;await createConversation();$('message').value=draft;attachments=files;renderAttachments();}catch(error){notice(error.message);return;}finally{switching(false);}}const text=$('message').value.trim()||(attachments.length?'Analiza los documentos adjuntos.':'');if(!text)return;clearNotice();$('welcome')?.remove();message('user',text+(attachments.length?'\nAdjuntos: '+attachments.map(a=>a.name).join(', '):''));const output=message('assistant','');$('message').value='';running=true;navigationState();runId='';$('send').disabled=true;$('attach').disabled=true;$('mic').disabled=true;$('stop').hidden=false;$('model-picker').disabled=true;$('activity').textContent='Pensando…';let terminal=false,activityView=null,activityState='disconnected';
-  try{const response=await api('/api/chat',{method:'POST',body:JSON.stringify({session_id:sid,message:text,attachments})});attachments=[];renderAttachments();const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='',event='';
-    while(true){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});let index;while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index).replace(/\r$/,'');buffer=buffer.slice(index+1);if(line.startsWith('event:'))event=line.slice(6).trim();else if(line.startsWith('data:')){let data;try{data=JSON.parse(line.slice(5));}catch{continue;}const type=data.type||event;if(data.run_id)runId=data.run_id;if(['tool.started','tool.completed','tool.failed'].includes(type)){if(!activityView)activityView=HermesActivity.view($('messages'),output.parentElement);activityView.event(type,data);}if(type==='assistant.delta')output.textContent+=data.delta||data.text||'';if(type==='assistant.completed'&&!output.textContent)output.textContent=data.text||data.content||data.message?.content||'';if(type==='tool.started')$('activity').textContent='Ejecutando herramienta…';if(type==='assistant.commentary')$('activity').textContent=(data.text||'Pensando…').slice(0,100);if(type==='run.completed'){terminal=true;activityState='completed';$('activity').textContent='Completado';}if(type==='run.failed'||type==='run.cancelled'){terminal=true;activityState=type==='run.cancelled'?'cancelled':'failed';notice(type==='run.cancelled'?'Respuesta detenida.':'La respuesta falló. Revisa Estado y el acceso a OpenAI.');}}}window.scrollTo({top:document.body.scrollHeight,behavior:'instant'});}
-    if(!terminal)notice('La conexión terminó sin un resultado confirmado. Recarga el historial antes de volver a intentarlo.');
-  }catch(error){notice(error.message);}finally{activityView?.finish(activityState);if(terminal){try{await loadConversation(sid);}catch(error){notice('La respuesta terminó, pero no se pudo actualizar el historial. Recarga antes de cargar mensajes anteriores.');$('older-messages').hidden=true;}}running=false;navigationState();$('send').disabled=false;$('attach').disabled=false;$('mic').disabled=false;$('stop').hidden=true;$('model-picker').disabled=false;$('activity').textContent='';}
+$('chat-form').onsubmit=async e=>{e.preventDefault();if(unavailable())return;skillPicker?.close();if(!sid){try{switching(true);const draft=$('message').value;const files=attachments;await createConversation();$('message').value=draft;attachments=files;renderAttachments();}catch(error){notice(error.message);return;}finally{switching(false);}}const text=$('message').value.trim()||(attachments.length?'Analiza los documentos adjuntos.':'');if(!text)return;clearNotice();$('welcome')?.remove();message('user',text+(attachments.length?'\nAdjuntos: '+attachments.map(a=>a.name).join(', '):''));const output=message('assistant','');$('message').value='';running=true;navigationState();runId='';$('send').disabled=true;$('attach').disabled=true;$('mic').disabled=true;$('stop').hidden=false;$('model-picker').disabled=true;$('activity').textContent='Pensando…';let terminal=false,activityView=null,activityState='disconnected',explanation='';
+  try{
+    const response=await api('/api/chat',{method:'POST',body:JSON.stringify({session_id:sid,message:text,attachments})});attachments=[];renderAttachments();
+    await readChatEvents(response.body,(type,data)=>{
+      if(data.run_id)runId=data.run_id;
+      if(['tool.started','tool.completed','tool.failed'].includes(type)){if(!activityView)activityView=HermesActivity.view($('messages'),output.parentElement);activityView.event(type,data);}
+      if(type==='assistant.delta')output.textContent+=typeof data.delta==='string'?data.delta:typeof data.text==='string'?data.text:'';
+      if(type==='assistant.completed'&&!output.textContent.trim()){
+        const answer=data.text||data.content||data.message?.content;
+        if(typeof answer==='string')output.textContent=answer;
+      }
+      if(type==='tool.started')$('activity').textContent='Ejecutando herramienta…';
+      if(type==='assistant.commentary')$('activity').textContent='El agente está trabajando…';
+      if(type==='invalid')explanation=chatFailure('protocol');
+      if(type==='run.completed'){
+        terminal=true;activityState=explanation?'failed':'completed';
+        if(!output.textContent.trim()&&!explanation)explanation=chatFailure('empty');
+      }
+      if(['run.failed','run.cancelled','error'].includes(type)){
+        terminal=true;activityState=type==='run.cancelled'?'cancelled':'failed';
+        explanation=chatFailure(type==='run.cancelled'?'cancelled':data.code||'failed');
+      }
+      window.scrollTo({top:document.body.scrollHeight,behavior:'instant'});
+      return terminal;
+    });
+    if(!terminal&&!explanation)explanation=chatFailure('disconnected');
+  }catch(error){
+    const code=error.status===401||error.status===403?'unauthorized':error.status===409?'conflict':error.status===504?'timeout':error.status>=500?'unavailable':'disconnected';
+    explanation=chatFailure(code);
+  }finally{
+    const partial=output.textContent;
+    if(explanation){output.textContent=(partial.trim()?partial+'\n\n':'')+explanation;notice(explanation);}
+    activityView?.finish(activityState);
+    if(terminal){try{await loadConversation(sid,{partial,explanation});}catch{
+      notice('No se pudo actualizar el historial. Se conserva lo recibido; recarga antes de cargar mensajes anteriores.');$('older-messages').hidden=true;
+    }}
+    running=false;navigationState();$('send').disabled=false;$('attach').disabled=false;$('mic').disabled=false;$('stop').hidden=true;$('model-picker').disabled=false;$('activity').textContent='';
+  }
 };
 function renderAttachments(){
   $('attachments').replaceChildren();
