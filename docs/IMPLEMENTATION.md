@@ -36,7 +36,7 @@ Fresh Hermes Agent deployment on the explicitly authorized VPS, using the author
 
 ## Operations and recovery
 
-Own units: `personal-agent.service`, `personal-agent-firewall.service`, `personal-agent-edge-link.service`, `personal-agent-backup.service`, `personal-agent-backup.timer`, and the dedicated workspace mount unit. Local copies of installed units are under `deploy/units/`.
+Own units: `personal-agent.service`, `personal-agent-firewall.service`, `personal-agent-edge-link.service`, `personal-agent-backup.service`, `personal-agent-backup.timer`, and the dedicated workspace mount unit. Current service templates under `deploy/units/` mirror the fixed-policy bootstrap; `workspace.mount.example` is a reference, not an installable escaped-path filename. The existing workspace mount is preserved. Follow `DEPLOYMENT.md`, not a bare Compose invocation from mutable source.
 
 `deploy/status.sh` inspects this project's containers, limits, workspace, units and HTTPS health. The edge-link service reconnects only the dedicated edge network if the shared Caddy container is recreated. It does not manage other projects' routes or containers.
 

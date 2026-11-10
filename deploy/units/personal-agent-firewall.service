@@ -4,6 +4,6 @@ Before=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh /srv/personal-agent/current/deploy/network-guard.sh
+ExecStart=/bin/sh /srv/personal-agent/deploy-policy/network-guard.sh
 [Install]
 WantedBy=multi-user.target

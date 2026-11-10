@@ -1,9 +1,8 @@
 [Unit]
 Description=Maintain only the personal workspace frontend attachment
 After=personal-agent.service
-Requires=personal-agent.service
 [Service]
-ExecStart=/usr/bin/python3 /srv/personal-agent/current/deploy/edge-link.py
+ExecStart=/usr/bin/python3 -I /srv/personal-agent/deploy-policy/edge-link.py
 Restart=on-failure
 RestartSec=10
 MemoryMax=96M

@@ -7,12 +7,10 @@ RequiresMountsFor=/srv/personal-agent/workspace
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/srv/personal-agent/current
-ExecStartPre=/usr/bin/docker compose create
-ExecStartPre=/bin/sh /srv/personal-agent/current/deploy/network-guard.sh
-ExecStart=/usr/bin/docker compose up -d --no-build
-ExecStop=/usr/bin/docker compose stop
-TimeoutStartSec=180
-TimeoutStopSec=90
+WorkingDirectory=/srv/personal-agent/deploy-policy
+ExecStart=/usr/bin/python3 -I /srv/personal-agent/deploy-policy/service_gate.py start
+ExecStop=/usr/bin/python3 -I /srv/personal-agent/deploy-policy/service_gate.py stop
+TimeoutStartSec=600
+TimeoutStopSec=190
 [Install]
 WantedBy=multi-user.target

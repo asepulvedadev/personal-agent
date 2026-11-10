@@ -44,6 +44,20 @@ jobs:
           python -m pytest tests -q -p no:cacheprovider --basetemp="$(mktemp -d)"
           node --test tests/*.cjs
 
+      - name: Validate the exact release archive against host policy
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.util, pathlib, subprocess, tempfile
+          spec = importlib.util.spec_from_file_location('release_gate', 'deploy/release_gate.py')
+          gate = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(gate)
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          archive = subprocess.check_output(['git', 'archive', '--format=tar.gz', f'--prefix=personal-agent-{sha}/', 'HEAD'])
+          with tempfile.TemporaryDirectory() as scratch:
+              gate.extract_source(archive, pathlib.Path(scratch) / 'source', sha)
+          PY
+
   deploy:
     needs: test
     if: >-
