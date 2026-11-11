@@ -146,3 +146,7 @@ test('client skip navigation preserves the bearer fragment and focuses content',
  await f.nodes.get('#skip-link').dispatch('click');
  assert.equal(f.doc.activeElement,f.nodes.get('#workspace'));assert.equal(f.history.length,0);
 });
+
+test('mobile task filters remain readable rather than squeezing into thirds',()=>{
+ const css=fs.readFileSync('app/static/projects.css','utf8');assert.match(css,/@media\(max-width:600px\)[\s\S]*\.toolbar\s*\{\s*flex-direction:column;/);
+});

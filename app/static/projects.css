@@ -653,6 +653,7 @@ button,input,textarea {
     display:block;
   }
   .toolbar {
+    flex-direction:column;
     align-items:stretch;
   }
   .toolbar>* {
