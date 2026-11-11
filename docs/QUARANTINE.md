@@ -175,4 +175,17 @@ claim Telegram coverage.
 
 ## Server-side chat boundary
 
+Owner reports begin with one standalone Spanish summary: declared purpose,
+potential benefit, practical concerns, scope and next action. Status words accompany
+icons; no icon means malware-free or installed. Later numbered pages retain the
+original technical findings, source locations, inventory, checks and omissions.
+The complete audit JSON remains available to the authenticated owner. Retrieving
+an existing receipt recomputes current analysis without rewriting prior chat history
+or changing approval state. Web and Telegram retain the same strict report schema.
+
+The JavaScript textual detector distinguishes ordinary `function ()` callbacks and
+Playwright `$eval` queries from calls to `eval` or the `Function` constructor.
+Those normal browser patterns are not reported as dynamic-evaluation findings.
+Actual evaluation and decoding remain review leads, not proof of malicious behavior.
+
 Before skill expansion or any capable-agent call, `/api/chat` intercepts exact `$cuarentena` requests, bare GitHub links, explicit GitHub skill-import requests, skill/archive/source attachments and skill-shaped frontmatter. Trusted intake returns durable, display-only review reports or specific failure reports without passing candidate content to a capable agent. This applies to direct API clients too; browser attachment routing is not the enforcement boundary. Ordinary repository discussions and ordinary document analysis keep their previous path. Intent recognition does not prove all paraphrases safe and is not a general natural-language security filter.

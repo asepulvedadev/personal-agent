@@ -32,7 +32,8 @@ def test_chat_upload_report_is_durable_shared_and_not_activated(portal, monkeypa
     assert 'beneficios' in response.text.lower() and item['id'] in response.text
     history = client.get('/api/quarantine/chat/' + SID).json()['messages']
     assert len(history) == 2 and history[-1]['role'] == 'assistant'
-    assert 'Draft neutral product' in history[-1]['content']
+    assert 'preparar y revisar textos' in history[-1]['content']
+    assert 'Draft neutral product' not in history[-1]['content']
     assert approved_skills(mod.CONTROL) == []
     assert 'Use the provided facts' not in response.text
     assert 'Revisión compartida' in history[-1]['content']
@@ -145,7 +146,7 @@ def test_imported_claims_are_plain_data_and_not_security_authority(portal, monke
     assert response.status_code==200
     assert 'Bloqueada' in response.text
     assert 'https://evil.example' not in response.text.lower()
-    assert 'declaración no confiable' in response.text
+    assert 'sin verificar su funcionamiento' in response.text
     assert not (mod.CONTROL/'quarantine'/item['id']/'approved.json').exists()
 
 

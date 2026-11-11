@@ -138,11 +138,128 @@ def _evidence_lines(item):
     return lines
 
 
+def _purpose(item):
+    """Describe declared intent without echoing arbitrary candidate instructions."""
+    descriptions = ' '.join(str(m.get('description','')) for m in item.get('metadata',{}).values()).lower()
+    purposes = [
+        (r'design|diseñ|frontend|interfaces?',
+         'Se presenta como una guía para diseñar y mejorar interfaces web.',
+         'Podría ayudarte a dar coherencia visual a tus páginas y revisar su presentación.'),
+        (r'product descriptions|copywrit|redact|writing|write|borrador',
+         'Se presenta como una guía para preparar y revisar textos.',
+         'Podría ayudarte a estructurar borradores y mantener un estilo consistente.'),
+        (r'research|investig|search|búsqueda',
+         'Declara ayudar a buscar y organizar información.',
+         'Podría ordenar una investigación y facilitar la comparación de resultados.'),
+        (r'automat|workflow|flujo',
+         'Declara ayudar a automatizar tareas o coordinar un flujo de trabajo.',
+         'Podría reducir pasos repetitivos, una vez verificados sus permisos y efectos.'),
+        (r'configur|diagnostic',
+         'Declara trabajar con configuración o información de diagnóstico.',
+         'Podría ayudar a revisar un entorno; hay que comprobar qué datos utiliza y comparte.'),
+    ]
+    for pattern, purpose, benefit in purposes:
+        if re.search(pattern,descriptions):
+            return purpose, benefit
+    return ('El objetivo del paquete no se identifica con suficiente claridad en los datos detectados.',
+            'Conviene confirmar su objetivo antes de incorporarlo al proyecto.')
+
+
+def _risk_explanation(finding):
+    code = finding['code']
+    if code=='credential_network_combination':
+        if finding['severity']=='high':
+            return ('En la fuente, una llamada de red recibe un dato obtenido de credenciales. Revisa el destino y si el envío está autorizado. '
+                    'No se comprobó si esa ruta llega a ejecutarse.')
+        return ('El mismo archivo consulta credenciales y realiza conexiones externas; '
+                'no se ha establecido que envíe esas credenciales.')
+    explanations = {
+        'credential_network_text':'En una misma instrucción aparecen una conexión externa y acceso a credenciales; hay que comprobar qué se enviaría.',
+        'download_execute':'Puede descargar instrucciones y pasarlas directamente a un intérprete para ejecutarlas.',
+        'dynamic_code_text':'Hay referencias a evaluación o decodificación de código; es necesario comprobar su origen y uso.',
+        'embedded_credential':'Se encontró una credencial escrita en el código; su valor se ocultó en el informe.',
+        'install_hook':'Incluye una tarea que se ejecutaría durante la instalación.',
+        'persistence_text':'Hay referencias a tareas automáticas o al inicio persistente de un proceso.',
+        'instruction_override':'El material contiene instrucciones para ignorar o debilitar reglas del asistente.',
+    }
+    categories = {
+        'credentials':'Hay operaciones relacionadas con credenciales que necesitan revisión.',
+        'execution':'Hay operaciones de ejecución que necesitan revisión.',
+        'network':'Hay conexiones externas que necesitan revisión.',
+        'persistence':'Hay operaciones de inicio automático que necesitan revisión.',
+    }
+    return explanations.get(code,categories.get(finding.get('category'),'Se detectó una operación que necesita revisión adicional.'))
+
+
+def _summary_lines(item):
+    """A standalone owner decision; machine evidence belongs to later pages."""
+    audit = item['audit']
+    coverage = audit['coverage']
+    origin = item.get('provenance',{})
+    metadata = list(item.get('metadata',{}).values())
+    name = origin.get('repository','').rsplit('/',1)[-1] or (metadata[0].get('name','') if metadata else '') or item.get('name','Paquete recibido')
+    name = claim(name)[:60] or 'Paquete recibido'
+    name = name[:1].upper()+name[1:]
+    findings = audit['indicators']
+    high = [f for f in findings if f['severity']=='high']
+    if high or audit['recommendation']['verdict']=='avoid':
+        status, next_step = '🔴 No lo actives todavía', 'Revisa primero las operaciones señaladas. No instales el paquete tal como está.'
+    elif item['state']=='approved':
+        status, next_step = '🟢 Aprobación registrada', 'La aprobación corresponde a su perfil original; este informe no confirma que se haya ejecutado.'
+    else:
+        status = '🟠 Análisis terminado; requiere revisión antes de instalar'
+        next_step = ('Revisa los permisos y recursos pendientes antes de decidir una adaptación. El informe no instala ni aprueba el paquete.'
+                     if not item.get('eligible') else 'El formato permite solicitar aprobación humana para su perfil; todavía no está aprobado.')
+    purpose, benefit = _purpose(item)
+    lines = ['🔎 '+name, status, '', '🧩 Qué hace',
+             purpose+' Descripción del autor, sin verificar su funcionamiento.',
+             '', '💡 Beneficios potenciales', benefit]
+    operations = {
+        'filesystem_read':'leer archivos', 'filesystem_write':'modificar archivos',
+        'network':'comunicarse con servicios externos', 'credentials':'acceder a variables o credenciales del entorno',
+        'process':'iniciar comandos o procesos', 'dynamic_code':'evaluar código en tiempo de ejecución',
+    }
+    detected = {c['category'] for c in audit['capabilities']}
+    actions = [label for category,label in operations.items() if category in detected]
+    if actions:
+        lines += ['', '🔧 Qué aparece en la fuente', 'Se identificaron operaciones o referencias para '+', '.join(actions[:4])+'. Su presencia no demuestra que se ejecuten en el uso normal.']
+    lines += ['', '⚠️ Qué debes revisar']
+    if findings:
+        seen = set()
+        for finding in sorted(findings,key=lambda f:f['severity']!='high'):
+            if finding['code'] in seen:
+                continue
+            if len(seen)==3:
+                break
+            seen.add(finding['code'])
+            lines.append('• '+_risk_explanation(finding))
+            lines.append('  Dónde: '+claim(finding['path'])+':'+str(finding['line']))
+        if len(findings)>len(seen):
+            lines.append('Hay más ubicaciones y contexto en el detalle técnico.')
+    else:
+        lines.append('No detecté señales de alto riesgo en los controles de fuente realizados. Eso no es una aprobación ni confirma su funcionamiento.')
+    lines += ['', '📊 Alcance de la revisión',
+              f"• Fuente inspeccionada: {coverage['inspected_files']} de {coverage['total_files']} archivos recibidos."]
+    selection = origin.get('selection')
+    if selection:
+        lines.append(f"• Selección de fuente: {selection['omitted_files']} recurso(s) no inspeccionados y {selection['excluded_repository_files']} archivos del resto del repositorio excluidos.")
+        lines.append('• Alcance: '+claim(', '.join(selection['roots']))+'. No se revisó todo el repositorio.')
+    if coverage['omitted'] and not selection:
+        lines.append('• Hay partes opacas, no analizadas o evidencia abreviada; están identificadas en el detalle.')
+    elif coverage['omitted']:
+        lines.append('• El detalle conserva las omisiones y la evidencia abreviada.')
+    lines.append('• No se probó su funcionamiento, ni se ejecutó un antivirus o una consulta de vulnerabilidades.')
+    lines += ['', '➡️ Siguiente paso', next_step]
+    if item['state']=='blocked':
+        lines.append('Bloqueada su activación directa: hace falta revisar o adaptar el formato. Esto no es un diagnóstico de malware.')
+    return lines
+
+
 def report(item, page=1):
-    """Paginate every bounded evidence row; Telegram and Web receive identical text."""
+    """Lead with a readable summary, preserving every bounded evidence page."""
     if not item.get('audit'):
         return _legacy_report(item)
-    pages, current = [], []
+    pages, current = ['\n'.join(_summary_lines(item))], ['🔬 Detalle técnico']
     length = 0
     for line in _evidence_lines(item):
         # Rows are data, never Markdown/HTML interpreted by either chat transport.
@@ -155,9 +272,9 @@ def report(item, page=1):
     if current:
         pages.append('\n'.join(current))
     page = page if isinstance(page, int) and not isinstance(page, bool) else 1
-    prefix = f"Revisión compartida · Hermes Web y Carpediev\nReferencia: {item['id']} · Cuarentena de fuente · Página {page}/{len(pages)}\n"
+    prefix = 'Revisión compartida · Hermes Web y Carpediev\n\n'
     content = pages[page-1] if 1 <= page <= len(pages) else f'Página no disponible. Consulta una página entre 1 y {len(pages)}.'
-    footer = '\nNo se ejecutó ni instaló el paquete.'
+    footer = f"\n\nReferencia: {item['id']} · Página {page}/{len(pages)}\nNo se ejecutó ni instaló el paquete."
     if page < len(pages):
         footer += f"\nMás evidencia: $cuarentena informe {item['id']} {page+1}"
     return {'version':1, 'scope':'shared', 'text':prefix+content+footer}

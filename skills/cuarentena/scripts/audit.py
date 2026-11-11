@@ -496,7 +496,11 @@ def _text_line(audit, path, number, line, kind):
     if re.search(r'\b(?:curl|wget|fetch|axios)\b', line, re.I) and re.search(r'process\.env|\$\{?[A-Z_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)\b', line):
         audit.indicator('credential_network_text', 'credentials', 'high', path, number,
                         f'Network and credential-source text occur on the same line ({kind}); dataflow/authorization needs review: {line}')
-    if re.search(r'\b(?:eval|Function)\s*\(|(?:base64\s+-d|frombase64string|atob\s*\()', line, re.I):
+    # JavaScript is case-sensitive: `function ()` is not the Function constructor.
+    # `$eval` is a browser-query API, not a call to the global eval primitive.
+    evaluation = re.search(r'(?<![\w$])(?:eval|Function)\s*\(', line)
+    decoding = re.search(r'(?:base64\s+-d|frombase64string|atob\s*\()', line, re.I)
+    if evaluation or decoding:
         audit.indicator('dynamic_code_text', 'execution', 'medium', path, number,
                         f'Textual decoding/dynamic-evaluation pattern ({kind}); not executed: {line}')
     if re.search(r'(?:crontab|systemctl\s+enable|/etc/cron|\.config/autostart|LaunchAgents|CurrentVersion\\Run)', line, re.I):

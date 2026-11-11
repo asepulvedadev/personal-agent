@@ -23,7 +23,10 @@ def item():
 
 
 def test_deep_report_has_specific_operations_dependencies_and_evidence():
-    text=report(item())['text']
+    import re
+    first=report(item())['text']
+    count=int(re.search(r'Página 1/(\d+)',first)[1])
+    text='\n'.join(report(item(),page=n)['text'] for n in range(1,count+1))
     for value in ('requests.post','tool.py:4','requests','2.32.4','example.test','upload','Credential transfer'):
         assert value in text
     assert 'Esta revisión no instala ni ejecuta contenido' not in text
@@ -69,7 +72,8 @@ def test_source_tool_api_exposes_audit_but_internal_token_has_only_paged_reports
     assert resource['audit']['inventory'][0]['sha256']
     result=client.post('/api/chat',headers=headers,json={'session_id':'owner_'+'b'*32,'message':'$cuarentena',
                                                        'attachments':[{'name':'tool.zip','quarantine_id':resource['id']}]})
-    assert result.status_code==200 and 'requests.post' in result.text
+    assert result.status_code==200 and 'credenciales' in result.text
+    assert 'requests.post' not in result.text
     detail=client.get('/api/quarantine/'+resource['id']).json()
     import re
     total=int(re.search(r'Página 1/(\d+)',detail['report']['text'])[1])
