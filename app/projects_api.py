@@ -80,6 +80,9 @@ def register_projects(app, *, control, owner, csrf, token):
             raise HTTPException(403,'Identifica el servicio autorizado.')
         return actor
 
+    # Reuse these exact guards before the outer middleware buffers large uploads.
+    app.state.projects_authorize = lambda request: owner_write(request) if request.url.path == '/api/projects/command' else service(request)
+
     def client(request):
         value = request.headers.get('authorization','')
         if not value.startswith('Bearer ') or len(value)>207:

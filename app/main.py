@@ -164,7 +164,11 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 async def boundaries(request, call_next):
     upload = request.url.path in {'/api/documents', '/api/audio/file', '/api/quarantine/upload', '/internal/quarantine/upload'}
     limit = (10*1024**2 if request.url.path == '/api/audio/file' else 5*1024**2) if upload else (300_000 if request.url.path == '/api/chat' else (2_000_000 if request.url.path.startswith('/provider/') else 65_536))
-    if request.url.path in {"/api/projects/command", "/internal/projects/command"}:
+    if request.method == 'POST' and request.url.path in {"/api/projects/command", "/internal/projects/command"}:
+        try:
+            app.state.projects_authorize(request)
+        except HTTPException as error:
+            return JSONResponse({'detail':error.detail},status_code=error.status_code)
         limit = 14 * 1024**2
     try:
         size = int(request.headers.get("content-length", "0"))

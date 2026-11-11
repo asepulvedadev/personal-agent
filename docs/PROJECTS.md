@@ -134,3 +134,20 @@ Rollback boundaries: infrastructure provisioning retains private DB data and its
 policy checkpoint; the UI/domain unit can be removed without deleting that data;
 native project-tool enablement is separate from existing image/quarantine tools.
 No data restoration is automatic. Risk: data/auth/concurrency and deployment.
+
+## Direct-release checkpoint
+
+The owner explicitly requested direct VPS deployment instead of relying on Actions.
+The preceding run 43100399185 completed successfully and accepted release 0120c26;
+Web, Hermes and the new database were healthy and the deployment lock was free.
+Direct activation still uses the same root-managed release gate, fixed Compose,
+mandatory backup and recovery logic. It does not use candidate host hooks or alter
+other applications. A commit-scoped skip instruction avoids a duplicate automatic
+Actions rollout; it does not disable future CI globally.
+
+The final upload correction reuses the exact endpoint guards before buffering
+project command bodies. Unauthenticated uploads cannot force the larger project
+body allocation. Observed RED then GREEN; independent probes checked eight
+negative owner/service/Origin/CSRF/actor combinations plus retained authorized
+uploads. Full local verification: 607 Python and 80 Node tests passed. No live
+project data, source attachments or credentials are included in this repository.

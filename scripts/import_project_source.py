@@ -2,7 +2,7 @@
 """Prepare/replay a private Word proposal import via the shared project API.
 
 The source directory and credentials are never copied into the repository. Run
-with --prepare to inspect counts before --apply. Network target is fixed private
+without --apply to prepare a private manifest and inspect counts. Network target is fixed private
 Web; SSH/file transfer authorization remains separate from this program.
 """
 import argparse
