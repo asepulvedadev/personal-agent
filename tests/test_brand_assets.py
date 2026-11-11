@@ -27,3 +27,8 @@ def test_navigation_places_configuration_before_secrets_and_removes_status_view(
     assert 'id="status"' not in html
     assert "showStatus" not in script
     assert "'/status'" not in script
+
+
+def test_projects_navigation_remains_available_when_branding_changes():
+    html = Path("app/static/index.html").read_text()
+    assert 'href="/projects"' in html

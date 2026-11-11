@@ -29,6 +29,7 @@ COPY runtime/quarantine_ingress.py runtime/patch_quarantine.py /opt/runtime/
 RUN python /opt/runtime/patch_quarantine.py /opt/hermes
 COPY runtime/patch_images.py /opt/runtime/patch_images.py
 RUN python /opt/runtime/patch_images.py /opt/hermes
+COPY runtime/projects_tool.py /opt/hermes/tools/personal_projects_tool.py
 USER 10001:10001
 WORKDIR /workspace
 CMD ["/opt/hermes/.venv/bin/python", "/opt/runtime/supervisor.py"]

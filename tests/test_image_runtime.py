@@ -32,7 +32,7 @@ def test_existing_web_toolsets_are_not_replaced_or_mutated():
              'image_gen': {'provider': 'fal', 'openai': {'base_url': 'https://wrong', 'api_key': 'wrong'}}}
     before = deepcopy(owner)
     config = runtime_config('owner-chat-model', owner_config=owner)
-    assert config['platform_toolsets']['api_server'] == ['file', 'owner-tool', 'image_gen']
+    assert config['platform_toolsets']['api_server'] == ['file', 'owner-tool', 'image_gen', 'personal_projects']
     assert config['platform_toolsets']['discord'] == ['owner-tool']
     assert config['image_gen'] == IMAGE_CONFIG
     assert config['mcp_servers'] == owner['mcp_servers']
@@ -80,7 +80,7 @@ def test_carpediev_images_override_stale_image_defaults_not_owner_chat(tmp_path,
     if existing:
         for key in ('model', 'agent', 'approvals'):
             assert actual[key] == existing[key]
-        assert actual['platform_toolsets']['telegram'] == ['file', 'owner-tool', 'image_gen']
+        assert actual['platform_toolsets']['telegram'] == ['file', 'owner-tool', 'image_gen', 'personal_projects']
         assert actual['platform_toolsets']['discord'] == ['owner-tool']
     prepare(tmp_path, base, 'synthetic-private-relay')
     assert json.loads((profile / 'config.yaml').read_text()) == actual

@@ -38,6 +38,17 @@ with tempfile.TemporaryDirectory(prefix='backup-',dir='/tmp') as tmp:
     elif p.is_file(): archive.add(p,arcname=rel,recursive=False)
 '''
 with tempfile.TemporaryDirectory(prefix='.backup-',dir=ROOT/'backups') as tmp:
+    dump=Path(tmp)/'projects.pg_dump'
+    database_enabled=(ROOT/'projects-db'/'web'/'database.json').exists()
+    if database_enabled:
+        with dump.open('wb') as out:
+            subprocess.run(['docker','exec','-u','999','personal-agent-projects-db','pg_dump',
+                            '-U','postgres','-d','personal_projects','--format=custom'],
+                           stdout=out,stderr=subprocess.PIPE,check=True,timeout=180)
+        with dump.open('rb') as inp:
+            subprocess.run(['docker','exec','-i','-u','999','personal-agent-projects-db',
+                            'pg_restore','--list'],stdin=inp,stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE,check=True,timeout=30)
     workspace=Path(tmp)/'workspace.tar.gz'
     with workspace.open('wb') as out:
         subprocess.run(['docker','exec','-i','personal-agent-hermes-1','python','-'],input=AGENT_SNAPSHOT.encode(),stdout=out,check=True)
@@ -46,6 +57,10 @@ with tempfile.TemporaryDirectory(prefix='.backup-',dir=ROOT/'backups') as tmp:
     partial=target.with_suffix('.partial')
     with tarfile.open(partial,'w',dereference=False) as archive:
         archive.add(workspace,arcname='workspace.tar.gz')
+        if database_enabled:
+            archive.add(dump,arcname='projects.pg_dump')
+            archive.add(ROOT/'projects-db'/'web',arcname='projects-database-config')
+            archive.add(ROOT/'projects-db'/'secrets',arcname='projects-database-recovery')
         archive.add(ROOT/'control',arcname='control')
         archive.add(ROOT/'runtime-auth',arcname='runtime-auth')
         archive.add(ROOT/'portal-bootstrap',arcname='portal-bootstrap')

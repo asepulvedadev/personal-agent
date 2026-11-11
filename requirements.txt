@@ -6,3 +6,5 @@ cryptography==50.0.2
 websockets==16.0
 pypdf==7.0.0
 defusedxml==0.7.1
+
+psycopg[binary]==3.3.8
