@@ -14,6 +14,8 @@ Pide, por ejemplo: «Genera una imagen cuadrada de una taza naranja sobre fondo 
 
 Hermes Web muestra la imagen privada y el control **Descargar imagen**. Carpediev usa el mismo relay y entrega el archivo mediante el transporte nativo de Telegram. La integración conserva conversaciones y ajustes ajenos a imágenes, y no inicia un segundo bot. Un despliegue saludable y las pruebas simuladas no demuestran una entrega real: cada canal debe comprobarse con su propia solicitud después del despliegue.
 
+La entrega de Telegram correlaciona el resultado con la llamada del asistente, tanto si invoca `image_generate` directamente como si usa el puente diferido `tool_call` con una única llamada a `image_generate`. No depende de que el modelo repita una ruta ni un marcador de adjunto en su respuesta. La correlación ignora llamadas malformadas, lotes de varias herramientas y resultados de otras herramientas que pretendan ser imágenes; también reconoce los adjuntos ya entregados en el historial para no reenviarlos en un turno posterior. Una imagen generada con éxito y un texto final, por sí solos, no prueban que Telegram haya recibido el adjunto.
+
 ## Contrato del relay
 
 El runtime autorizado envía un objeto JSON a `POST /provider/v1/images/generations` con su token de servicio existente. Solo se admiten los cinco campos indicados; no se envía `response_format`. El relay llama exclusivamente a la API oficial de generación de OpenAI, sin seguir redirecciones ni descargar URL de imágenes.

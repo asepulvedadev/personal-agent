@@ -264,9 +264,236 @@ def _build_dynamic_image_schema() -> dict[str, Any]:
 """
 
 
+# Pinned gateway/parser excerpts exercise native collectors, not a delivery reimplementation.
+NATIVE_GATEWAY = """from __future__ import annotations
+import re
+import json
+from typing import Any, Optional
+from gateway.media_repair import tool_name_by_call_id as _tool_name_by_call_id
+
+_AUTO_APPEND_MEDIA_TOOL_NAMES = {"text_to_speech", "text_to_speech_tool", "image_generate"}
+
+
+_JSON_MEDIA_TOOL_PATH_FIELDS = ("host_image", "image", "agent_visible_image")
+
+
+_TOOL_MEDIA_RE = re.compile(
+    r'MEDIA:((?:[A-Za-z]:[/\\\\]|/|~\\/)\\S+\\.(?:png|jpe?g|gif|webp|'
+    r'mp4|mov|avi|mkv|webm|ogg|opus|mp3|wav|m4a|'
+    r'flac|epub|pdf|zip|rar|7z|docx?|xlsx?|pptx?|'
+    r'txt|csv|apk|ipa))',
+    re.IGNORECASE)
+
+
+def _collect_auto_append_media_tags(
+    messages: list[dict[str, Any]], history_offset: int = 0,
+    history_media_paths: Optional[set] = None) -> tuple[list[str], bool]:
+    \"\"\"Collect real media tags from current-turn producer-tool results only.
+
+    Producer allowlist: docs/logs/search results contain example MEDIA: strings that must never become
+    attachments. If mid-run compression shrank the list below the history length the slice is
+    untrustworthy, so scan every message (dedup via history_media_paths).
+
+    1. Producer-tool allowlist: only tools that intentionally emit deliverable artifacts (TTS) are eligible.
+    (Fixes the original report behind #16721.) 2. Current-turn isolation: only messages produced this turn
+    are scanned, so a tool result from an earlier turn (still present in the full message list) cannot leak
+    onto a later text-only reply (#34608).
+    When that happens the slice boundary is no longer trustworthy, so fall back to scanning every message
+    and rely on ``history_media_paths`` for dedup, preserving the compression-safe behaviour of #160. The
+    producer-tool allowlist still applies on the fallback path.
+    \"\"\"
+    history_media_paths = history_media_paths or set()
+    new_messages = (messages[history_offset:]
+                    if history_offset and len(messages) >= history_offset else messages)
+
+    tool_name_by_call_id = _tool_name_by_call_id(new_messages)
+
+    media_tags: list[str] = []
+    has_voice_directive = False
+    for msg in new_messages:
+        if msg.get("role") not in ("tool", "function"):
+            continue
+        call_id = str(msg.get("tool_call_id") or msg.get("call_id") or "")
+        if tool_name_by_call_id.get(call_id) not in _AUTO_APPEND_MEDIA_TOOL_NAMES:
+            continue
+        content = str(msg.get("content") or "")
+        tool_name = tool_name_by_call_id.get(call_id)
+        # image_generate emits a JSON path field, not a MEDIA: tag; extract it: deterministic delivery.
+        if tool_name == "image_generate" and "MEDIA:" not in content:
+            try:
+                payload = json.loads(content)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict) and payload.get("success"):
+                for field in _JSON_MEDIA_TOOL_PATH_FIELDS:
+                    path = payload.get(field)
+                    if (isinstance(path, str)
+                            and _TOOL_MEDIA_RE.fullmatch(f"MEDIA:{path}")
+                            and path not in history_media_paths):
+                        media_tags.append(f"MEDIA:{path}")
+                        break
+            continue
+        if "MEDIA:" not in content:
+            continue
+        for match in _TOOL_MEDIA_RE.finditer(content):
+            path = match.group(1).strip().rstrip('",}')
+            if path and path not in history_media_paths:
+                media_tags.append(f"MEDIA:{path}")
+        if "[[audio_as_voice]]" in content:
+            has_voice_directive = True
+
+    return media_tags, has_voice_directive
+
+
+def _collect_history_media_paths(agent_history: list[dict[str, Any]]) -> set:
+    \"\"\"Dedup set of media paths already delivered (JSON-payload and assistant-message shapes alike).
+
+    Missing the JSON-payload shape caused #46627; missing the assistant-message shape caused repeated
+    delivery when the model echoed a previous MEDIA tag.
+    \"\"\"
+    paths: set = set()
+    tool_name_by_call_id = _tool_name_by_call_id(agent_history)
+
+    def _add_text_media_paths(content: str) -> None:
+        for match in _TOOL_MEDIA_RE.finditer(content):
+            path = match.group(1).strip().rstrip('",}')
+            if path:
+                paths.add(path)
+        # The regex misses quoted/spaced paths extract_media accepts; use the same extractor to dedup.
+        media_files, _ = BasePlatformAdapter.extract_media(content)
+        paths.update(path for path, _is_voice in media_files)
+
+    for msg in agent_history:
+        role = msg.get("role")
+        if role not in ("assistant", "tool", "function"):
+            continue
+        content = str(msg.get("content", "") or "")
+        if "MEDIA:" in content:
+            _add_text_media_paths(content)
+            continue
+        if role == "assistant":
+            continue
+        cid = str(msg.get("tool_call_id") or msg.get("call_id") or "")
+        if tool_name_by_call_id.get(cid) == "image_generate":
+            try:
+                payload = json.loads(content)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict) and payload.get("success"):
+                for field in _JSON_MEDIA_TOOL_PATH_FIELDS:
+                    jp = payload.get(field)
+                    if isinstance(jp, str) and jp:
+                        paths.add(jp)
+                        break
+    return paths
+
+"""
+
+NATIVE_CALL_NAMES = """def tool_name_by_call_id(messages: list[dict[str, Any]]) -> dict[str, str]:
+    \"\"\"Map assistant tool-call ids to tool names for the given messages.\"\"\"
+    mapping: dict[str, str] = {}
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        for call in msg.get("tool_calls") or []:
+            call_id = call.get("id") or call.get("call_id")
+            name = str((call.get("function") or {}).get("name") or call.get("name") or "")
+            if call_id and name:
+                mapping[str(call_id)] = name
+    return mapping
+
+"""
+
+NATIVE_NORMALIZE = """def normalize_tool_call_entries(args: dict[str, Any]) -> tuple[list[dict[str, Any]], Optional[str]]:
+    \"\"\"Normalize ``tool_call`` arguments into a ``calls[]`` list of entries.
+
+    Accepts the advertised batch shape ``{"calls": [{"name", "arguments"}, ...]}``
+    and, tolerantly, the legacy single shape ``{"name": ..., "arguments": ...}``
+    (a single call is a batch of one). Each entry's ``arguments`` is coerced to
+    a dict (JSON strings parsed, ``None`` → ``{}``). Returns ``(entries, None)``
+    or ``([], error_message)``.
+    \"\"\"
+    raw_calls = args.get("calls")
+    if raw_calls is None:
+        # Legacy single shape.
+        if not str(args.get("name") or "").strip():
+            return [], "tool_call requires 'calls' (an array of {name, arguments})"
+        raw_calls = [{"name": args.get("name"), "arguments": args.get("arguments")}]
+    if isinstance(raw_calls, str):
+        # Tolerate the model emitting the batch envelope as a JSON string —
+        # mirror the per-entry `arguments` handling below (#114484).
+        try:
+            raw_calls = json.loads(raw_calls)
+        except json.JSONDecodeError as e:
+            return [], f"tool_call 'calls' is not valid JSON: {e}"
+    if isinstance(raw_calls, dict):
+        raw_calls = [raw_calls]
+    if not isinstance(raw_calls, list) or not raw_calls:
+        return [], "tool_call 'calls' must be a non-empty array of {name, arguments}"
+
+    entries: list[dict[str, Any]] = []
+    for position, raw in enumerate(raw_calls):
+        if not isinstance(raw, dict):
+            return [], f"tool_call calls[{position}] must be an object with 'name' and 'arguments'"
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            return [], f"tool_call calls[{position}] requires a 'name'"
+        if name in BRIDGE_TOOL_NAMES:
+            return [], f"tool_call cannot invoke '{name}' (it is itself a bridge tool)"
+        raw_args = raw.get("arguments")
+        if raw_args is None or (isinstance(raw_args, str) and not raw_args.strip()):
+            # "" / whitespace is how some OpenAI-compatible gateways spell "no arguments" for a
+            # parameterless tool (#83937); the loop already treats an empty outer arguments string
+            # as {} (turn_tool_validation), and a missing required param still surfaces below via
+            # validate_deferred_call_args instead of an opaque JSON parse error.
+            raw_args = {}
+        if isinstance(raw_args, str):
+            try:
+                raw_args = json.loads(raw_args)
+            except json.JSONDecodeError as e:
+                return [], f"tool_call calls[{position}].arguments is not valid JSON: {e}"
+        if not isinstance(raw_args, dict):
+            return [], f"tool_call calls[{position}].arguments must be an object"
+        entries.append({"name": name, "arguments": raw_args})
+    return entries, None
+
+"""
+
+NATIVE_APPEND_MEDIA = """def _append_auto_media_tags(self, final_response: str, result, agent_history, history_media_paths) -> str:
+    \"\"\"Append MEDIA:<path> tags from tool results (e.g. TTS) that the model's final text omits, so
+    extract_media() delivers each file once. Scoped to THIS turn (slice at len(agent_history)) so
+    a stale MEDIA: path from an earlier turn never rides a later reply; the history-path dedup is
+    the secondary guard — and the sole one when mid-run compression shrank the list.\"\"\"
+    from gateway.run import _collect_auto_append_media_tags
+    if "MEDIA:" in final_response:
+        return final_response
+    # Scan tool results for MEDIA:<path> tags that need to be delivered as native audio/file
+    # attachments. The TTS tool embeds MEDIA: tags in its JSON response, but the model's final text
+    # reply usually doesn't include them. We collect unique tags from tool results and append any that
+    # aren't already present in the final response, so the adapter's extract_media() can find and
+    # deliver the files exactly once. Scope the scan to THIS turn's tool results only. ``agent_history``
+    # was passed into run_conversation as ``conversation_history``, so the agent's returned ``messages``
+    # list is ``agent_history`` followed by the messages produced this turn. Slicing at
+    # ``len(agent_history)`` isolates the current turn precisely, so a stale MEDIA: path emitted by a
+    # tool several turns earlier (still present in the full message list) can never leak onto a later
+    # text-only reply. (Fixes #34608) Path-based deduplication against _history_media_paths (collected
+    # before run_conversation) is retained as a secondary guard. It is also the sole guard on the
+    # fallback branch taken when mid-run context compression shrinks the message list below the original
+    # history length, preserving the compression-safe behaviour of #160.
+    media_tags, has_voice_directive = _collect_auto_append_media_tags(
+        result.get("messages", []), history_offset=len(agent_history), history_media_paths=history_media_paths,
+    )
+    if not media_tags:
+        return final_response
+    unique_tags = (["[[audio_as_voice]]"] if has_voice_directive else []) + list(dict.fromkeys(media_tags))
+    return final_response + "\\n" + "\\n".join(unique_tags)
+"""
+
+
 def write_native_fixtures(root, monkeypatch):
     from runtime import patch_images
-    fixture = {patch_images.PROVIDER: NATIVE_PROVIDER, patch_images.TOOL: NATIVE_TOOL}
+    fixture = {patch_images.PROVIDER: NATIVE_PROVIDER, patch_images.TOOL: NATIVE_TOOL,
+               'gateway/run.py': NATIVE_GATEWAY}
     for relative, source in fixture.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -435,3 +662,164 @@ def test_native_provider_uncertain_failure_is_not_retried_and_warns_about_charge
     assert 'outcome is unknown' in result['error']
     assert 'charged' in result['error']
     assert native.saved == []
+
+
+@pytest.fixture
+def gateway_native(native, monkeypatch):
+    """Compile the patched, original gateway collectors with native bridge normalization."""
+    import re
+    import sys
+    from typing import Any, Optional
+    namespace = {'json': json, 're': re, 'Any': Any, 'Optional': Optional,
+                 'BRIDGE_TOOL_NAMES': {'tool_search', 'tool_describe', 'tool_call'}}
+    exec(compile(NATIVE_CALL_NAMES + NATIVE_NORMALIZE, '<pinned-bridge-parser>', 'exec'), namespace)
+    namespace['_tool_name_by_call_id'] = namespace['tool_name_by_call_id']
+    namespace['BasePlatformAdapter'] = types.SimpleNamespace(
+        extract_media=lambda content: ([(match.group(1), False) for match in namespace['_TOOL_MEDIA_RE'].finditer(content)], content))
+    bridge = types.ModuleType('tools.tool_search_validation')
+    bridge.normalize_tool_call_entries = namespace['normalize_tool_call_entries']
+    monkeypatch.setitem(sys.modules, bridge.__name__, bridge)
+    source = (native.root / 'gateway/run.py').read_text()
+    tree = ast.parse(source)
+    # Execute native functions/globals without booting the live gateway or importing its dependencies.
+    function_names = {'_personal_image_tool_name_by_call_id', '_collect_auto_append_media_tags', '_collect_history_media_paths'}
+    constant_names = {'_AUTO_APPEND_MEDIA_TOOL_NAMES', '_JSON_MEDIA_TOOL_PATH_FIELDS', '_TOOL_MEDIA_RE'}
+    selected = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in function_names:
+            selected.append(node)
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in constant_names for target in node.targets):
+            selected.append(node)
+    module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), *selected], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), '<pinned-gateway-media>', 'exec'), namespace)
+    gateway = types.ModuleType('gateway.run')
+    gateway._collect_auto_append_media_tags = namespace['_collect_auto_append_media_tags']
+    monkeypatch.setitem(sys.modules, gateway.__name__, gateway)
+    exec(compile(NATIVE_APPEND_MEDIA, '<pinned-turn-runner-media>', 'exec'), namespace)
+    return namespace
+
+
+def image_messages(wrapper=None, *, result=None, call_id='image-call', result_id=None, outer='tool_call'):
+    if wrapper is None:
+        wrapper = {'calls': [{'name': 'image_generate', 'arguments': {'prompt': 'A square garden', 'aspect_ratio': 'square'}}]}
+    return [
+        {'role': 'assistant', 'tool_calls': [{'id': call_id, 'type': 'function',
+         'function': {'name': outer, 'arguments': json.dumps(wrapper)}}]},
+        {'role': 'tool', 'tool_call_id': result_id or call_id, 'content': json.dumps(result if result is not None else {
+            'success': True, 'image': '/home/agent/.hermes/cache/generated/images/generated.png'})},
+    ]
+
+
+def test_native_gateway_delivers_actual_deferred_production_shape_once(gateway_native):
+    messages = image_messages()
+    path = '/home/agent/.hermes/cache/generated/images/generated.png'
+    collect = gateway_native['_collect_auto_append_media_tags']
+    assert collect(messages) == (['MEDIA:' + path], False)
+    append = gateway_native['_append_auto_media_tags']
+    rendered = append(None, 'Generated image.', {'messages': messages}, [], set())
+    assert rendered == 'Generated image.\nMEDIA:' + path
+    assert append(None, rendered, {'messages': messages}, [], set()) == rendered
+
+
+@pytest.mark.parametrize('wrapper', [
+    {'calls': {'name': 'image_generate', 'arguments': {'prompt': 'Garden'}}},
+    {'calls': json.dumps([{'name': 'image_generate', 'arguments': {'prompt': 'Garden'}}])},
+    {'calls': json.dumps({'name': 'image_generate', 'arguments': json.dumps({'prompt': 'Garden'})})},
+    {'name': 'image_generate', 'arguments': {'prompt': 'Garden'}},
+    {'name': 'image_generate', 'arguments': json.dumps({'prompt': 'Garden'})},
+    {'name': ' image_generate ', 'arguments': None},
+])
+def test_native_gateway_supports_the_existing_single_local_bridge_shapes(gateway_native, wrapper):
+    assert gateway_native['_collect_auto_append_media_tags'](image_messages(wrapper))[0] == [
+        'MEDIA:/home/agent/.hermes/cache/generated/images/generated.png']
+
+
+def test_native_gateway_deferred_history_dedup_and_current_turn_isolation(gateway_native):
+    messages = image_messages()
+    path = '/home/agent/.hermes/cache/generated/images/generated.png'
+    history_paths = gateway_native['_collect_history_media_paths'](messages)
+    assert history_paths == {path}
+    collect = gateway_native['_collect_auto_append_media_tags']
+    assert collect(messages, history_media_paths=history_paths) == ([], False)
+    assert collect(messages, history_offset=len(messages)) == ([], False)
+    assert collect([*messages, {'role': 'assistant', 'content': 'A later reply.'}], history_offset=len(messages)) == ([], False)
+    # Compression can invalidate the offset: history-path dedup remains the secondary guard.
+    assert collect(messages, history_offset=len(messages) + 10, history_media_paths=history_paths) == ([], False)
+    assert gateway_native['_append_auto_media_tags'](None, 'A later reply.', {'messages': messages}, messages, history_paths) == 'A later reply.'
+
+
+@pytest.mark.parametrize('wrapper', [
+    {'calls': []}, {'calls': 'not-json'}, {'calls': [None]}, {'calls': None},
+    {'calls': [{'name': 'image_generate', 'arguments': []}]},
+    {'calls': [{'name': 'image_generate', 'arguments': 'not-json'}]},
+    {'calls': [{'name': 'image_generate'}, {'name': 'image_generate'}]},
+    {'calls': [{'name': 'terminal', 'arguments': {'command': 'echo fakeimage'}}]},
+    {'calls': [{'name': 'image_generate'}, {'name': 'terminal'}]},
+    {'calls': [{'name': 'tool_call', 'arguments': {'name': 'image_generate'}}]},
+    {'calls': [{'name': 'tool_describe', 'arguments': {'name': 'image_generate'}}]},
+    {'name': 'terminal', 'arguments': {'command': 'echo fakeimage'}},
+])
+def test_native_gateway_rejects_malformed_multiple_or_nonimage_bridges(gateway_native, wrapper):
+    messages = image_messages(wrapper)
+    assert gateway_native['_collect_auto_append_media_tags'](messages) == ([], False)
+    assert gateway_native['_collect_history_media_paths'](messages) == set()
+
+
+def test_native_gateway_rejects_failed_mismatched_or_self_claimed_results(gateway_native):
+    collect = gateway_native['_collect_auto_append_media_tags']
+    failed = image_messages(result={'success': False, 'image': '/tmp/fake.png'})
+    mismatched = image_messages(result_id='wrong-id')
+    invalid_path = image_messages(result={'success': True, 'image': 'https://remote/fake.png'})
+    untrusted = image_messages({'name': 'terminal', 'arguments': {}})
+    untrusted[1]['name'] = 'image_generate'
+    untrusted[1]['content'] = json.dumps({'name': 'image_generate', 'success': True, 'image': '/tmp/fake.png'})
+    for messages in (failed, mismatched, invalid_path, untrusted, [untrusted[1]]):
+        assert collect(messages) == ([], False)
+    # Invalid outer argument JSON/shape never confers producer identity.
+    for args in ('not-json', '[]', [], None):
+        messages = image_messages()
+        messages[0]['tool_calls'][0]['function']['arguments'] = args
+        assert collect(messages) == ([], False)
+
+
+def test_native_gateway_existing_direct_images_tts_and_unrelated_output_stay_identical(gateway_native):
+    collect = gateway_native['_collect_auto_append_media_tags']
+    direct = image_messages({'prompt': 'Garden'}, outer='image_generate')
+    assert collect(direct) == (['MEDIA:/home/agent/.hermes/cache/generated/images/generated.png'], False)
+    assert gateway_native['_collect_history_media_paths'](direct) == {'/home/agent/.hermes/cache/generated/images/generated.png'}
+    tts = image_messages(outer='text_to_speech', call_id='tts-call')
+    tts[1]['content'] = 'MEDIA:/tmp/generated.ogg [[audio_as_voice]]'
+    assert collect(tts) == (['MEDIA:/tmp/generated.ogg'], True)
+    terminal = image_messages(outer='terminal', call_id='terminal-call')
+    terminal[1]['content'] = 'MEDIA:/tmp/fake.png'
+    assert collect(terminal) == ([], False)
+    assert collect([*direct, *tts, *terminal]) == ([
+        'MEDIA:/home/agent/.hermes/cache/generated/images/generated.png', 'MEDIA:/tmp/generated.ogg'], True)
+
+
+def test_native_gateway_wrapper_identity_keeps_original_last_call_wins(gateway_native):
+    image = image_messages()
+    terminal = image_messages({'name': 'terminal', 'arguments': {}})
+    assert gateway_native['_collect_auto_append_media_tags']([*image[:1], *terminal]) == ([], False)
+    direct_terminal = image_messages(outer='terminal')
+    assert gateway_native['_collect_auto_append_media_tags']([*image[:1], *direct_terminal]) == ([], False)
+
+
+def test_native_gateway_accepts_dict_outer_arguments_without_mutating_messages(gateway_native):
+    messages = image_messages()
+    call = messages[0]['tool_calls'][0]
+    call['function']['arguments'] = json.loads(call['function']['arguments'])
+    original = deepcopy(messages)
+    assert gateway_native['_collect_auto_append_media_tags'](messages)[0] == [
+        'MEDIA:/home/agent/.hermes/cache/generated/images/generated.png']
+    assert messages == original
+
+
+def test_image_patch_gateway_drift_is_rejected_before_any_target_write(tmp_path, monkeypatch):
+    patch_images = write_native_fixtures(tmp_path, monkeypatch)
+    original = {relative: (tmp_path / relative).read_bytes() for relative in patch_images.PINNED}
+    (tmp_path / patch_images.GATEWAY).write_text(NATIVE_GATEWAY + '\n# unexpected drift\n')
+    with pytest.raises(RuntimeError, match='not pristine'):
+        patch_images.patch(tmp_path)
+    for relative in (patch_images.PROVIDER, patch_images.TOOL):
+        assert (tmp_path / relative).read_bytes() == original[relative]

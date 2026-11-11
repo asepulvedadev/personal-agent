@@ -11,9 +11,11 @@ import sys
 
 PROVIDER = 'plugins/image_gen/openai/__init__.py'
 TOOL = 'tools/image_generation_tool.py'
+GATEWAY = 'gateway/run.py'
 PINNED = {
     PROVIDER: '9894554d437f9531267a74258a75b5a790db8cbec969e38db81576e46c718cd0',
     TOOL: '61728818282eec3f3d108ad7287c724c70e0b3746cee1ad840c7c5fc838f0c86',
+    GATEWAY: '680c3c2cea322293f10ed52dd5a98546128a971623bad2d03c0e53052c649fb2',
 }
 
 PROVIDER_REPLACEMENTS = (
@@ -86,11 +88,58 @@ TOOL_REPLACEMENTS = (
 )
 
 
+GATEWAY_ANCHOR = 'from gateway.media_repair import tool_name_by_call_id as _tool_name_by_call_id\n'
+GATEWAY_HELPER = '''
+
+def _personal_image_tool_name_by_call_id(messages):
+    """Correlate only single deferred image calls; never trust result-side name claims."""
+    mapping = _tool_name_by_call_id(messages)
+    try:
+        from tools.tool_search_validation import normalize_tool_call_entries
+    except ImportError:
+        return mapping  # Direct producers keep their original delivery behavior.
+    # Match the original helper's last-call-wins semantics for repeated call IDs.
+    calls_by_id = {}
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        for call in message.get("tool_calls") or []:
+            call_id = call.get("id") or call.get("call_id")
+            if call_id:
+                calls_by_id[str(call_id)] = call
+    for call_id, call in calls_by_id.items():
+        if mapping.get(call_id) != "tool_call":
+            continue
+        function = call.get("function") or {}
+        arguments = function.get("arguments", call.get("arguments"))
+        try:
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments)
+            if not isinstance(arguments, dict):
+                continue
+            entries, error = normalize_tool_call_entries(arguments)
+        except (TypeError, ValueError):
+            continue
+        if not error and len(entries) == 1 and entries[0]["name"] == "image_generate":
+            mapping[call_id] = "image_generate"
+    return mapping
+'''
+
+GATEWAY_REPLACEMENTS = (
+    (GATEWAY_ANCHOR, GATEWAY_ANCHOR + GATEWAY_HELPER),
+    ('    tool_name_by_call_id = _tool_name_by_call_id(new_messages)\n',
+     '    tool_name_by_call_id = _personal_image_tool_name_by_call_id(new_messages)\n'),
+    ('    tool_name_by_call_id = _tool_name_by_call_id(agent_history)\n',
+     '    tool_name_by_call_id = _personal_image_tool_name_by_call_id(agent_history)\n'),
+)
+
+
 def patch(root):
-    """Validate both pristine targets before writing either; repeated application refuses."""
+    """Validate every pristine target before writing any; repeated application refuses."""
     root = Path(root)
     updates = []
-    for relative, replacements in ((PROVIDER, PROVIDER_REPLACEMENTS), (TOOL, TOOL_REPLACEMENTS)):
+    for relative, replacements in ((PROVIDER, PROVIDER_REPLACEMENTS), (TOOL, TOOL_REPLACEMENTS),
+                                   (GATEWAY, GATEWAY_REPLACEMENTS)):
         target = root / relative
         if any(path.is_symlink() for path in [root, target, *target.parents]):
             raise RuntimeError('Image patch targets cannot be symlinks')
