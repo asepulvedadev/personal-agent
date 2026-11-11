@@ -176,3 +176,89 @@ def test_shared_review_preserves_approved_and_delivered_skill_state(portal, monk
     current=client.get('/api/quarantine/'+item['id']).json()
     assert current['state']=='approved'
     assert 'Aprobación registrada' in receipt_text(summary(current),SimpleNamespace(review_url=''))
+
+
+@pytest.mark.parametrize('command', ['$cuarentena', '$CUARENTENA'])
+def test_explicit_help_is_durable_and_never_calls_a_model(portal, monkeypatch, command):
+    mod, client = portal
+    no_agent(monkeypatch, mod)
+    response = chat(client, login(client), command)
+    assert response.status_code == 200
+    assert '$cuarentena https://github.com/' in response.text
+    assert '$cuarentena lista' in response.text
+    history = client.get('/api/quarantine/chat/' + SID).json()['messages']
+    delta = json.loads(response.text.split('\n\n')[0].removeprefix('data: '))['delta']
+    assert len(history) == 2 and history[-1]['content'] == delta
+
+
+def test_explicit_link_and_file_review_before_skill_expansion(portal, monkeypatch):
+    import app.quarantine_chat as intake
+    mod, client = portal
+    no_agent(monkeypatch, mod)
+    calls = []
+    async def source(url):
+        calls.append(url)
+        return SAFE, {'kind':'upload', 'filename':'SKILL.md'}
+    monkeypatch.setattr(intake, 'github_package', source)
+    headers = login(client)
+    assert chat(client, headers, '$cuarentena https://github.com/acme/tool').status_code == 200
+    assert calls == ['https://github.com/acme/tool']
+    assert chat(client, headers, '$cuarentena', [{'name':'tool.py', 'text':'print("hello")'}]).status_code == 200
+    assert len(client.get('/api/quarantine').json()['items']) == 2
+
+
+@pytest.mark.parametrize('command', [
+    '$cuarentena https://example.com/tool',
+    '$cuarentena https://github.com/a/one https://github.com/a/two',
+    '$cuarentena something uncertain',
+    'please $cuarentena https://github.com/a/one',
+    '$cuarentena https://github.com/a/one https://example.com/tool',
+])
+def test_invalid_explicit_invocation_never_falls_through(portal, monkeypatch, command):
+    import app.quarantine_chat as intake
+    mod, client = portal
+    no_agent(monkeypatch, mod)
+    async def forbidden(*args):
+        raise AssertionError('Invalid invocation must not download')
+    monkeypatch.setattr(intake, 'github_package', forbidden)
+    response = chat(client, login(client), command)
+    assert response.status_code == 200
+    assert 'No se ha descargado' in response.text
+    assert len(client.get('/api/quarantine/chat/' + SID).json()['messages']) == 2
+
+
+def test_explicit_review_commands_and_paging(portal, monkeypatch):
+    import app.quarantine_chat as intake
+    mod, client = portal
+    no_agent(monkeypatch, mod)
+    headers = login(client)
+    item = put(client, headers).json()
+    assert item['id'] in chat(client, headers, '$cuarentena lista').text
+    assert item['id'] in chat(client, headers, '$cuarentena ' + item['id']).text
+    pages = []
+    def summary(item, page=1):
+        pages.append(page)
+        return {'report':{'text':'Revisión compartida · Hermes Web y Carpediev\nPágina de prueba'}}
+    monkeypatch.setattr(intake, 'summary', summary)
+    assert chat(client, headers, '$cuarentena informe ' + item['id'] + ' 2').status_code == 200
+    assert chat(client, headers, '$cuarentena ' + item['id'] + ' 3').status_code == 200
+    assert pages == [2, 3]
+    assert 'No se ha descargado' in chat(client, headers, '$cuarentena ' + item['id'] + ' 0').text
+
+
+def test_explicit_lookalike_is_not_intercepted(tmp_path):
+    import asyncio
+    from app.quarantine_chat import ChatQuarantine
+    handler = ChatQuarantine(tmp_path)
+    for message in ['$cuarentenaXYZ', '$cuarentena-tools', '$cuarentena/other']:
+        assert asyncio.run(handler.handle(SID, message, [])) is None
+
+
+def test_explicit_help_and_rejection_keep_the_shared_transport_contract():
+    from app.quarantine_chat import HELP, REJECT
+    from runtime.quarantine_ingress import HELP as telegram_help, REJECT as telegram_reject, receipt_text
+    from types import SimpleNamespace
+    assert HELP == telegram_help and REJECT == telegram_reject
+    for text in (HELP, REJECT):
+        report = {'kind':'quarantine-list', 'report':{'version':1, 'scope':'shared', 'text':text}}
+        assert receipt_text(report, SimpleNamespace(review_url='')) == text

@@ -19,6 +19,38 @@ permission to create or execute everything in a package.
 
 ## Shared chat workflow
 
+### Evidence-backed `$cuarentena`
+
+`$cuarentena LINK` and `$cuarentena` with original attachments now enter the trusted
+intake directly, before ordinary model/skill expansion. `$cuarentena` alone explains
+usage; `$cuarentena lista` lists receipts; `$cuarentena ID` and
+`$cuarentena informe ID PAGE` read evidence pages. Existing bare-link, `cuarentena`
+and `ver skill ID` behavior remains available. Ordinary repository questions remain
+ordinary chat. Explicit malformed/mixed requests never fall through to the agent.
+
+The versioned auditor in `skills/cuarentena/scripts/audit.py` produces inventory and
+SHA-256 fingerprints, coverage/omissions, Python AST/alias/call observations, structured
+dependency declarations, entrypoints/install hooks, external hostnames, license
+declarations and indicators with file/line evidence. Non-Python code uses clearly
+labeled lexical inspection, not execution or a claimed parser proof. Recommendations
+are review priorities, independent of the unchanged promotion policy.
+
+Owner detail includes the complete bounded `audit` JSON. Shared chat reports paginate
+that evidence under the existing v1 report envelope and 3,600-character transport
+limit. `GET /api/quarantine/ID?page=N` and the narrow internal report route accept
+pages 1–1000. Candidate credentials are redacted before report clipping; raw full source
+is not sent to a capable model. Failed or omitted analysis is explicit. Reports list
+actual checks rather than claiming that antivirus, CVE lookup, dynamic tests or package
+behavior were verified when those checks did not run. No dynamic runner is installed
+or granted host execution authority by this change.
+
+Codex receives the same trusted skill folder. Its portable, standard-library-only
+`scripts/review.py SOURCE --format json` accepts an explicit local file/ZIP or a
+canonical public GitHub source. Its public fetcher never uses ambient credentials,
+redirects, Git, package installers, candidate modules or active skill storage.
+`scripts/audit.py PATH --format json` is strictly offline. Neither traverses arbitrary
+candidate directories. See [auditor details](CUARENTENA-AUDITOR.md).
+
 Send a canonical GitHub skill/repository link or use the normal chat attachment clip for original ZIP or skill files. There is no separate quarantine toolbar button or dialog. Binary files first use the bounded owner-authenticated upload endpoint; chat receives an opaque receipt, not extracted package text. Explicit skill-file text from API clients is inspected as source, never forwarded to the capable agent. A string pretending to contain a ZIP is refused.
 
 Trusted `/api/chat` interception precedes skill expansion, provider checks and agent execution. Reports explain the package's **unverified declared purpose**, observed structural/integrity/pattern findings, supported-format usability and conditional benefits. This is bounded static assessment, not an exhaustive security or effectiveness audit. No LLM with tools investigates the raw package.
@@ -51,10 +83,19 @@ submodules or Git LFS actions run. Redirects, private/unavailable sources and
 oversized streamed responses fail closed. The fetch helper is injectable in tests;
 the tests make no real source/provider calls.
 
-The whole archive must pass limits before the selected subtree is inspected.
+For a repository/tree URL, the whole archive must pass limits before the selected subtree is inspected.
 This deliberately rejects large repositories even when their selected directory
 is small. Failed remote fetches provide no imported bytes to retain; successfully
 received archive bytes retain commit and path provenance even if analysis blocks.
+
+A supported `blob/REF/path` URL retrieves exactly that regular source file at the
+resolved immutable commit, verifies its Git blob fingerprint and declared size, and
+records the file scope. It does not download or assess the rest of the repository.
+Symlinks/submodules and changed blob hashes are refused. Commit resolution uses
+[GitHub's SHA-only media type](https://docs.github.com/en/rest/commits/commits#get-a-commit),
+not a potentially enormous commit diff. File metadata/content comes from the fixed
+[repository contents API](https://docs.github.com/en/rest/repos/contents#get-repository-content);
+its advertised arbitrary download URL is never followed.
 
 Metadata, commit resolution and download share a single 15-second deadline, below
 Telegram's 20-second broker request timeout. Failed GitHub imports produce a fixed,
@@ -109,8 +150,11 @@ All three require a constant-time checked bearer token from
 Missing/empty token files return 503; invalid tokens return 401. Owner cookies,
 the provider token and the runtime-config token are not substitutes. These routes
 cannot approve, read settings, or retrieve raw imported/approved content. Reports
-contain IDs/hashes, provenance, manifest, finding codes, state, eligibility, plan
-and `untrusted: true`, never content previews or frontmatter descriptions.
+contain IDs/hashes, provenance, manifest, finding codes, state, eligibility, plan,
+bounded sanitized source evidence and `untrusted: true`, never full source bodies
+or content previews. Large redundant metadata lists are abbreviated with original
+counts in `transport`; complete evidence remains available in paginated reports
+and the owner detail API.
 Names and paths in reports are still untrusted data. Original profile binding
 prevents approving an internal import for a different profile.
 
@@ -121,4 +165,4 @@ claim Telegram coverage.
 
 ## Server-side chat boundary
 
-Before skill expansion or any capable-agent call, `/api/chat` refuses bare GitHub links, explicit GitHub skill-import requests, skill/archive/source attachments and skill-shaped frontmatter with HTTP 409 directing the owner to the dedicated quarantine intake. This applies to direct API clients too; browser attachment routing is not the enforcement boundary. Ordinary repository discussions and ordinary document analysis keep their previous path. Intent recognition does not prove all paraphrases safe and is not a general natural-language security filter.
+Before skill expansion or any capable-agent call, `/api/chat` intercepts exact `$cuarentena` requests, bare GitHub links, explicit GitHub skill-import requests, skill/archive/source attachments and skill-shaped frontmatter. Trusted intake returns durable, display-only review reports or specific failure reports without passing candidate content to a capable agent. This applies to direct API clients too; browser attachment routing is not the enforcement boundary. Ordinary repository discussions and ordinary document analysis keep their previous path. Intent recognition does not prove all paraphrases safe and is not a general natural-language security filter.

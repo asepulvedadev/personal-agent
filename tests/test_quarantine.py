@@ -117,6 +117,47 @@ def test_github_pinning_and_strict_source_validation(portal,monkeypatch):
     assert len(seen)==count
 
 
+def test_single_github_tool_file_is_pinned_without_downloading_repository(portal, monkeypatch):
+    import base64
+    from app import quarantine as q
+    _, client=portal
+    headers=login(client)
+    commit='a'*40
+    source=b'import requests\nrequests.get("https://example.test/data")\n'
+    blob=__import__('hashlib').sha1(b'blob '+str(len(source)).encode()+b'\0'+source).hexdigest()
+    seen=[]
+    async def fetch(url, limit):
+        seen.append((url,limit))
+        if '/commits/' in url:
+            assert limit <= 80
+            return commit.encode()
+        if '/contents/' in url:
+            assert url.endswith('?ref='+commit)
+            return json.dumps({'type':'file','path':'tool.py','encoding':'base64','sha':blob,
+                               'size':len(source),'content':base64.b64encode(source).decode()}).encode()
+        return b'{"private":false,"default_branch":"main"}'
+    monkeypatch.setattr(q,'fetch_public',fetch)
+    result=client.post('/api/quarantine/github',headers=headers,json={'url':'https://github.com/acme/tools/blob/main/tool.py'})
+    assert result.status_code==200
+    item=result.json()
+    assert item['name']=='tool.py' and item['provenance']['commit']==commit
+    assert item['manifest'][0]['sha256']==q.digest(source)
+    assert not item['eligible'] and all('codeload' not in url for url,_ in seen)
+
+
+def test_single_github_file_rejects_symlinks_and_hash_mismatch(portal, monkeypatch):
+    from app import quarantine as q
+    _,client=portal
+    headers=login(client)
+    async def fetch(url,limit):
+        if '/commits/' in url:return ('a'*40).encode()
+        if '/contents/' in url:return b'{"type":"symlink","encoding":"base64","content":"eA==","sha":"wrong","size":1}'
+        return b'{"private":false,"default_branch":"main"}'
+    monkeypatch.setattr(q,'fetch_public',fetch)
+    result=client.post('/api/quarantine/github',headers=headers,json={'url':'https://github.com/acme/tools/blob/main/tool.py'})
+    assert result.status_code==400 and client.get('/api/quarantine').json()['items']==[]
+
+
 def test_approved_artifact_tampering_is_rejected(portal):
     from app.quarantine import approved_skills
     m,c=portal;h=login(c);item=put(c,h).json();approve(c,h,item)

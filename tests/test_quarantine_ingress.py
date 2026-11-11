@@ -351,7 +351,7 @@ def test_actual_broker_review_required_summary_has_a_safe_receipt():
     item.update(id='a' * 32, created_at=1)
     reply = receipt_text(summary(item), CONFIG)
     assert 'requiere revisión' in reply
-    assert 'Esta revisión no instala ni ejecuta contenido' in reply
+    assert 'No se ejecutó ni instaló el paquete' in reply
     assert 'product facts' not in reply
 
 
@@ -388,3 +388,99 @@ def test_shared_chat_review_commands_never_reach_the_capable_agent():
 def test_malformed_shared_assessment_is_refused(report):
     with pytest.raises(IntakeError):
         receipt_text({'id':'a'*32,'state':'quarantined','report':report},CONFIG)
+
+
+@pytest.mark.parametrize('text', ['$cuarentena', '$CUARENTENA'])
+def test_explicit_telegram_help_stops_without_broker(text):
+    msg, broker = message(text), Broker()
+    with pytest.raises(Stop):
+        run(msg, broker)
+    assert broker.calls == []
+    assert '$cuarentena https://github.com/' in msg.replies[0]
+    assert '$cuarentena lista' in msg.replies[0]
+
+
+def test_explicit_telegram_source_and_file_intake():
+    for msg, expected in [
+        (message('$cuarentena https://github.com/a/tool'), ('github', 'https://github.com/a/tool', 'carpediev')),
+        (message('$cuarentena', Document('tool.txt', b'tool evidence')), ('upload', 'tool.txt', b'tool evidence', 'carpediev')),
+    ]:
+        broker = Broker()
+        with pytest.raises(Stop):
+            run(msg, broker)
+        assert broker.calls == [expected]
+
+
+@pytest.mark.parametrize('text,document', [
+    ('$cuarentena https://example.com/tool', None),
+    ('$cuarentena https://github.com/a/one https://github.com/a/two', None),
+    ('$cuarentena https://github.com/a/one https://example.com/tool', None),
+    ('$cuarentena something uncertain', None),
+    ('please $cuarentena https://github.com/a/tool', None),
+    ('$cuarentena https://github.com/a/tool', Document()),
+    ('https://github.com/a/tool', Document()),
+])
+def test_explicit_telegram_ambiguity_is_not_forwarded_or_downloaded(text, document):
+    msg, broker = message(text, document), Broker()
+    with pytest.raises(Stop):
+        run(msg, broker)
+    assert broker.calls == []
+    assert document is None or document.gets == 0
+    assert 'No se ha descargado' in msg.replies[0]
+
+
+def test_explicit_owner_mismatch_and_broker_error_always_stop():
+    broker = Broker()
+    with pytest.raises(Stop):
+        run(message('$cuarentena https://github.com/a/tool', owner=111), broker)
+    assert broker.calls == []
+    msg = message('$cuarentena https://github.com/a/tool')
+    with pytest.raises(Stop):
+        run(msg, Broker(TimeoutError('do not expose')))
+    assert 'do not expose' not in msg.replies[0]
+
+
+def test_explicit_lookalikes_and_ordinary_repository_discussion_remain_ordinary():
+    for text in ['$cuarentenaXYZ', '$cuarentena-tools', '$cuarentena/other',
+                 'How does https://github.com/acme/skills work?']:
+        assert candidate_for_message(message(text)) is None
+    assert candidate_for_message(message('Discuss https://github.com/acme/project', Document('notes.txt'))) is None
+
+
+def test_explicit_telegram_list_detail_and_paging():
+    class ReviewBroker(Broker):
+        async def review(self, reference, page=1):
+            self.calls.append(('review', reference, page))
+            return {'kind':'quarantine-list','report':{
+                'version':1, 'scope':'shared',
+                'text':'Revisión compartida · Hermes Web y Carpediev\nInforme de prueba'}}
+    for command, reference, page in [
+        ('$cuarentena lista', 'list', 1),
+        ('$cuarentena ' + 'a'*32, 'a'*32, 1),
+        ('$cuarentena informe ' + 'a'*32 + ' 2', 'a'*32, 2),
+        ('$cuarentena ' + 'a'*32 + ' 3', 'a'*32, 3),
+        ('$cuarentena informe ' + 'a'*32 + ' 101', 'a'*32, 101),
+        ('ver skill ' + 'a'*32, 'a'*32, 1),
+        ('cuarentena', 'list', 1),
+    ]:
+        broker = ReviewBroker()
+        with pytest.raises(Stop):
+            run(message(command), broker)
+        assert broker.calls == [('review', reference, page)]
+    assert candidate_for_message(message('$cuarentena ' + 'a'*32 + ' 0')).kind == 'reject'
+
+
+def test_broker_review_page_has_only_validated_query():
+    calls = []
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request.full_url)
+            return io.BytesIO(b'{"kind":"quarantine-list"}')
+    broker = BrokerClient(BrokerConfig('http://web:8080','t'*32), opener=Opener())
+    asyncio.run(broker.review('a'*32, 2))
+    assert calls == ['http://web:8080/internal/quarantine/' + 'a'*32 + '?page=2']
+    asyncio.run(broker.review('a'*32, 101))
+    assert calls[-1].endswith('?page=101')
+    for page in [0, 1001, True, '2']:
+        with pytest.raises(IntakeError):
+            asyncio.run(broker.review('a'*32, page))

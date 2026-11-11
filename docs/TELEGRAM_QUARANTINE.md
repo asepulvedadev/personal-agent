@@ -122,6 +122,15 @@ The broker uses `review_required` for retained material requiring further review
 
 ## Chat-first shared review and authorized cutover
 
+The explicit `$cuarentena` command supports a canonical GitHub link or original
+attachment, `lista`, a receipt ID, and `informe ID PAGE`. Empty invocation displays
+fixed usage help. Exact mention matching excludes lookalike skill names. Malformed,
+unsupported or mixed input is consumed and explained without ordinary agent fallback.
+Help uses the existing strict quarantine-list envelope. Evidence pages preserve the
+v1 shared-report schema and 3,600-character limit; the narrow broker appends only a
+validated numeric page, never an arbitrary source endpoint. The same source auditor
+serves Web and Telegram; real bot delivery must still be verified independently.
+
 `cuarentena` and `ver skill RECEIPT_ID` are intercepted before ordinary agent dispatch, under the same exact bot/owner/private-chat checks as uploads. They call only fixed narrow GET report/list endpoints. Their reports are identical to Web assessments; no portal button or capable-agent review is involved.
 
 The VPS supervisor explicitly enables native multiplexing and routes the exact owner's DM on the default-owned Telegram transport to `carpediev`. Web's unprefixed API remains the default identity. Carpediev has its own configuration, SOUL, skills and internal relay credential; it must not receive a duplicate Telegram bot token in its own profile environment.

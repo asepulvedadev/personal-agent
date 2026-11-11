@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cuarentena"
+  short_description: "Analiza skills y herramientas antes de usarlas"
+  default_prompt: "Usa $cuarentena para analizar este enlace o archivo y explicar qué hace, qué riesgos tiene y si resulta útil."

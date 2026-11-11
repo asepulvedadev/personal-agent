@@ -19,6 +19,8 @@ from fastapi import HTTPException, Request
 from app.media import file_name, read_upload
 from app.quarantine_worker import inspect_files
 from app.quarantine_assessment import report, import_failure
+from skills.cuarentena.scripts import source as source_review
+from skills.cuarentena.scripts.audit import audit_files
 
 SOURCE_BYTES = 5 * 1024**2
 MEMBER_BYTES = 512 * 1024
@@ -184,7 +186,8 @@ def analyze(data, name, provenance):
     state = 'blocked' if any(f['severity'] == 'blocked' for f in findings) else 'review_required' if findings else 'quarantined'
     return {'sha256':digest(data), 'provenance':provenance, 'manifest':manifest,
             'findings':findings, 'candidates':candidates, 'metadata':metadata,
-            'state':state, 'eligible':not findings, 'notice':NOTICE, 'plan':PLAN if findings else []}, files
+            'state':state, 'eligible':not findings, 'notice':NOTICE, 'plan':PLAN if findings else [],
+            'audit':audit_files(files)}, files
 
 
 class Quarantine:
@@ -220,10 +223,10 @@ class Quarantine:
         except (FileNotFoundError, ValueError):
             raise HTTPException(404, 'Importación no encontrada.')
         if len(data) > SOURCE_BYTES or digest(data) != item['sha256']:
-            return {**item, 'state':'blocked', 'eligible':False, 'findings':item['findings'] +
+            return {**item, 'state':'blocked', 'eligible':False, 'audit':None, 'findings':item['findings'] +
                     [{'code':'source_hash_changed', 'path':'', 'severity':'blocked'}]}
         current, files = analyze(data, item['name'], item['provenance'])
-        item.update({key:current[key] for key in ('findings','candidates','metadata','state','eligible','plan')})
+        item.update({key:current[key] for key in ('findings','candidates','metadata','state','eligible','plan','audit')})
         if (folder / 'approved.json').exists():
             approved = valid_approval(folder, item, files)
             item['state'] = 'approved' if approved else 'blocked'
@@ -314,28 +317,10 @@ def approved_skills(control_dir, profile=None):
 
 
 def github_source(url):
-    if not isinstance(url,str) or len(url) > 600 or any(ord(c) <= 32 or ord(c) > 126 for c in url):
-        raise HTTPException(400, 'Usa un enlace público de GitHub sin credenciales.')
-    parsed = urlsplit(url)
-    if (parsed.scheme != 'https' or parsed.netloc != 'github.com' or parsed.query or parsed.fragment or
-            '%' in parsed.path or '\\' in url):
-        raise HTTPException(400, 'Solo se aceptan enlaces HTTPS públicos de github.com sin parámetros.')
-    parts = parsed.path.strip('/').split('/')
-    if len(parts) < 2 or not all(re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', p) and p not in {'.','..'} for p in parts):
-        raise HTTPException(400, 'Ruta de GitHub inválida.')
-    owner, repo = parts[:2]
-    repo = repo.removesuffix('.git')
-    if not repo or repo in {'.','..'}:
-        raise HTTPException(400, 'Repositorio inválido.')
-    ref, path = None, ''
-    if len(parts) > 2:
-        if len(parts) < 4 or parts[2] not in {'tree','blob'}:
-            raise HTTPException(400, 'Usa un repositorio o una ruta tree/blob con referencia explícita.')
-        ref = parts[3]
-        path = '/'.join(parts[4:])
-        if parts[2] == 'blob' and (not path or PurePosixPath(path).suffix.lower() not in {'.md','.txt'}):
-            raise HTTPException(400, 'El enlace a archivo debe ser Markdown o texto.')
-    return owner, repo, ref, path
+    try:
+        return source_review.parse_source(url)
+    except source_review.SourceError:
+        raise HTTPException(400, 'Usa un enlace HTTPS público y canónico de GitHub a una skill o herramienta.') from None
 
 
 async def fetch_public(url, limit):
@@ -345,7 +330,8 @@ async def fetch_public(url, limit):
         raise Rejected('invalid_fetch_host')
     async with httpx.AsyncClient(proxy=os.getenv('HTTPS_PROXY'), trust_env=False,
                                 follow_redirects=False, timeout=20) as client:
-        async with client.stream('GET', url, headers={'Accept':'application/vnd.github+json','User-Agent':'personal-agent-quarantine'}) as response:
+        accept = source_review.accept_type(url)
+        async with client.stream('GET', url, headers={'Accept':accept,'User-Agent':'personal-agent-quarantine'}) as response:
             if response.status_code != 200:
                 raise Rejected('github_public_source_unavailable')
             if int(response.headers.get('content-length','0')) > limit:
@@ -359,28 +345,14 @@ async def fetch_public(url, limit):
 
 
 async def github_package(url):
-    owner, repo, ref, path = github_source(url)
-    prefix = 'https://api.github.com/repos/'+owner+'/'+repo
     try:
-        async with asyncio.timeout(GITHUB_TIMEOUT):
-            metadata = json.loads(await fetch_public(prefix, 65536))
-            if metadata.get('private') is not False:
-                raise Rejected('public_repository_required')
-            ref = ref or metadata['default_branch']
-            if not isinstance(ref,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', ref):
-                raise Rejected('unsupported_reference')
-            commit = json.loads(await fetch_public(prefix+'/commits/'+quote(ref,safe=''), 262144))['sha']
-            if not isinstance(commit,str) or not re.fullmatch(r'[a-f0-9]{40}', commit):
-                raise Rejected('invalid_commit')
-            data = await fetch_public('https://codeload.github.com/'+owner+'/'+repo+'/zip/'+commit, SOURCE_BYTES)
-    except (TimeoutError, httpx.TimeoutException) as exc:
-        raise HTTPException(504, 'Se agotó el tiempo de descarga de GitHub. No se instaló contenido.') from exc
-    except Rejected as exc:
-        status = 413 if str(exc) == 'source_size_limit' else 400
-        raise HTTPException(status, 'No se pudo importar el repositorio público dentro de los límites. No se instaló contenido.') from exc
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-        raise HTTPException(400, 'No se pudo importar el repositorio público dentro de los límites. No se instaló contenido.') from exc
-    return data, {'kind':'github', 'url':url, 'repository':owner+'/'+repo, 'commit':commit, 'path':path}
+        return await source_review.load_github(url, fetch_public, timeout=GITHUB_TIMEOUT)
+    except source_review.SourceError as error:
+        raise HTTPException(error.status, 'No se pudo importar la fuente pública dentro de los límites. No se instaló contenido.') from None
+    except httpx.TimeoutException:
+        raise HTTPException(504, 'Se agotó el tiempo de descarga de GitHub. No se instaló contenido.') from None
+    except httpx.HTTPError:
+        raise HTTPException(400, 'No se pudo importar el repositorio público. No se instaló contenido.') from None
 
 
 def ingest_identity(request):
@@ -395,11 +367,18 @@ def ingest_identity(request):
         raise HTTPException(401, 'Se requiere el token dedicado de ingreso.')
 
 
-def summary(item):
+def summary(item, page=1):
     # Filenames and provenance remain untrusted data; descriptions and content are omitted.
     keys = ('id','sha256','provenance','manifest','findings','state','eligible','notice','plan','created_at')
-    return {**{key:item[key] for key in keys}, 'untrusted':True,
-            'profile':item['provenance'].get('profile'), 'report':report(item)}
+    result = {**{key:item[key] for key in keys}, 'untrusted':True,
+              'profile':item['provenance'].get('profile'), 'report':report(item, page=page)}
+    # Reports paginate the audit; redundant legacy arrays must not break the 64KiB broker.
+    if len(json.dumps(result,ensure_ascii=True).encode()) > 60000:
+        result['transport'] = {'manifest_total':len(result['manifest']), 'findings_total':len(result['findings']),
+                               'metadata_abbreviated':True, 'complete_evidence':'owner detail and paginated reports'}
+        result['manifest'] = result['manifest'][:8]
+        result['findings'] = result['findings'][:8]
+    return result
 
 
 def register_quarantine(app, owner, csrf, control):
@@ -440,7 +419,7 @@ def register_quarantine(app, owner, csrf, control):
             raise HTTPException(409, 'Espera a que termine la importación anterior.')
         async with intake:
             data, provenance = await github_package(url)
-            return store.create(data, 'github.zip', provenance)
+            return store.create(data, provenance.get('filename','github.zip'), provenance)
 
     @app.get('/api/quarantine')
     async def listing(request:Request):
@@ -452,7 +431,9 @@ def register_quarantine(app, owner, csrf, control):
     @app.get('/api/quarantine/{item_id}')
     async def detail(item_id:str, request:Request):
         owner(request)
-        return store.read(item_id)
+        item = store.read(item_id)
+        item['report'] = report(item, page=report_page(request))
+        return item
 
     @app.post('/api/quarantine/{item_id}/approve')
     async def approval(item_id:str, request:Request):
@@ -498,9 +479,16 @@ def register_quarantine(app, owner, csrf, control):
             except HTTPException as error:
                 return {'kind':'quarantine-error', 'report':import_failure(error.status_code)}
             provenance.update(profile=profile, channel='internal')
-            return summary(store.create(data, 'github.zip', provenance))
+            return summary(store.create(data, provenance.get('filename','github.zip'), provenance))
 
     @app.get('/internal/quarantine/{item_id}')
     async def internal_report(item_id:str, request:Request):
         ingest_identity(request)
-        return summary(store.read(item_id, previews=False))
+        return summary(store.read(item_id, previews=False), page=report_page(request))
+
+
+def report_page(request):
+    value = request.query_params.get('page','1')
+    if not re.fullmatch(r'(?:[1-9][0-9]{0,2}|1000)', value):
+        raise HTTPException(400, 'Usa un número de página entre 1 y 1000.')
+    return int(value)

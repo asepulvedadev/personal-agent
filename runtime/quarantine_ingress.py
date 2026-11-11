@@ -21,6 +21,19 @@ MAX_RESPONSE_BYTES = 65536
 GUARD_GROUP = -10000
 GUARD_VERSION = "personal-agent-quarantine-v1"
 _GITHUB = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>`\"']+", re.I)
+_URL = re.compile(r"https?://[^\s<>`\"']+", re.I)
+_EXPLICIT = re.compile(r'(?<!\S)\$cuarentena(?![A-Za-z0-9_./-])', re.I)
+_COMMAND = re.compile(r'\$cuarentena(?:\s+([^\r\n]*))?\Z', re.I)
+_COMMAND_DETAIL = re.compile(r'(?:informe\s+)?([a-f0-9]{32})(?:\s+([1-9][0-9]{0,2}|1000))?\Z', re.I)
+HELP = ('Revisión compartida · Hermes Web y Carpediev\n'
+        'Usa $cuarentena https://github.com/propietario/repositorio o escribe $cuarentena y adjunta el archivo original de la skill o herramienta.\n'
+        'Envía un solo enlace o los archivos, sin mezclarlos. Solo se admiten enlaces HTTPS de GitHub y formatos de código o ZIP compatibles.\n'
+        '$cuarentena lista muestra las revisiones; $cuarentena ID muestra el informe; $cuarentena informe ID 2 abre otra página.\n'
+        'La revisión analiza el contenido como datos: no lo instala ni ejecuta.')
+REJECT = ('Revisión compartida · Hermes Web y Carpediev\n'
+          'Solicitud de cuarentena ambigua o no compatible. No se ha descargado, instalado ni ejecutado contenido.\n'
+          'Usa $cuarentena con un único enlace HTTPS de GitHub o adjunta el archivo original sin enlaces. '
+          'También puedes usar $cuarentena lista o $cuarentena informe ID [página de 1 a 1000].')
 _INTAKE = re.compile(r"\b(?:skills?|capabilit\w*|habilidad\w*|cuarentena|quarantine|import\w*|instal\w*|incorpora\w*|estudia\w*|aprende\w*)\b", re.I)
 _TEXT_FILE_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".py", ".sh", ".bash", ".js", ".ts", ".mjs", ".cjs", ".ps1", ".rb", ".go", ".rs", ".html", ".css", ".xml"}
 _UPLOAD_EXTENSIONS = _TEXT_FILE_EXTENSIONS | {".zip", ".skill"}
@@ -72,6 +85,7 @@ class Candidate:
     kind: str
     url: str = ""
     name: str = ""
+    page: int = 1
 
 
 def _message_text(message):
@@ -84,11 +98,43 @@ def candidate_for_message(message):
         return None
     text = _message_text(message)
     document = getattr(message, "document", None)
+    urls = _URL.findall(text)
+    for entity in [*(getattr(message, "entities", None) or []), *(getattr(message, "caption_entities", None) or [])]:
+        value = getattr(entity, "url", None)
+        if isinstance(value, str) and _URL.fullmatch(value):
+            urls.append(value)
+    urls = list(dict.fromkeys(v.rstrip(".,;!?") for v in urls))
+    explicit = _EXPLICIT.search(text)
+    if explicit:
+        command = _COMMAND.fullmatch(text.strip())
+        argument = command[1].strip() if command and command[1] else ''
+        if not command:
+            return Candidate('reject')
+        if document is not None:
+            if argument or urls:
+                return Candidate('reject')
+            name = str(getattr(document, 'file_name', '') or '')
+            return Candidate('upload' if Path(name).suffix.lower() in _UPLOAD_EXTENSIONS else 'reject', name=name)
+        if not argument and not urls:
+            return Candidate('help')
+        if argument.casefold() == 'lista' and not urls:
+            return Candidate('review', url='list')
+        detail = _COMMAND_DETAIL.fullmatch(argument)
+        if detail and not urls:
+            return Candidate('review', url=detail[1].lower(), page=int(detail[2] or 1))
+        if len(urls) == 1 and argument == urls[0]:
+            try:
+                return Candidate('github', url=_safe_github_url(argument))
+            except IntakeError:
+                pass
+        return Candidate('reject')
     if document is not None:
         name = str(getattr(document, "file_name", "") or "")
         extension = Path(name).suffix.lower()
         if extension in _ORDINARY_DOCUMENTS and not _INTAKE.search(text):
             return None
+        if urls:
+            return Candidate('reject')
         return Candidate("upload" if extension in _UPLOAD_EXTENSIONS else "reject", name=name)
     query = re.fullmatch(r'(?:/?(?:ver|revisar)\s+)?/?skill\s+([a-f0-9]{32})[.!]?', text.strip(), re.I)
     if query:
@@ -186,10 +232,13 @@ class BrokerClient:
             raise IntakeError("Invalid broker metadata")
         return result
 
-    async def review(self, item_id):
+    async def review(self, item_id, page=1):
         if item_id != 'list' and not re.fullmatch(r'[a-f0-9]{32}', item_id):
             raise IntakeError('Invalid review reference')
-        return await asyncio.wait_for(asyncio.to_thread(self._post, '/internal/quarantine/'+item_id, None, 'application/json', 'GET'), timeout=25)
+        if type(page) is not int or not 1 <= page <= 1000 or (item_id == 'list' and page != 1):
+            raise IntakeError('Invalid review page')
+        path = '/internal/quarantine/' + item_id + ('?page=' + str(page) if page > 1 else '')
+        return await asyncio.wait_for(asyncio.to_thread(self._post, path, None, 'application/json', 'GET'), timeout=25)
 
     async def ingest_github(self, url, profile):
         data = json.dumps({"url": _safe_github_url(url), "profile": profile}).encode()
@@ -272,8 +321,12 @@ class QuarantineIngress:
             if not self._authorized(message, context):
                 return
             try:
-                if candidate.kind == "review":
-                    result = await self.broker.review(candidate.url)
+                if candidate.kind in {'help', 'reject'}:
+                    result = {'kind':'quarantine-list', 'report':{
+                        'version':1, 'scope':'shared', 'text':HELP if candidate.kind == 'help' else REJECT}}
+                elif candidate.kind == "review":
+                    result = (await self.broker.review(candidate.url, page=candidate.page)
+                              if candidate.page > 1 else await self.broker.review(candidate.url))
                 elif candidate.kind == "github":
                     result = await self.broker.ingest_github(_safe_github_url(candidate.url), self.config.target_profile)
                 elif candidate.kind == "upload":

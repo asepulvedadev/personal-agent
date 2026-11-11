@@ -4,5 +4,6 @@ WORKDIR /opt/portal
 COPY requirements.lock /tmp/requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock && useradd -u 10002 -M -s /usr/sbin/nologin portal
 COPY app /opt/portal/app
+COPY skills/cuarentena /opt/portal/skills/cuarentena
 USER 10002:10002
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--limit-concurrency", "32", "--ws-max-size", "32768", "--ws-max-queue", "4", "--proxy-headers", "--forwarded-allow-ips", "172.30.42.3"]
