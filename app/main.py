@@ -25,6 +25,7 @@ from app.settings import register_settings
 from app.integrations import register_integrations, managed_variables
 from app.customization import register_customization
 from app.specialist import register_specialist
+from app.projects_api import register_projects
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 CONTROL = Path(os.getenv("CONTROL_DIR", "/control"))
@@ -38,7 +39,7 @@ DENIED = {"PATH", "HOME", "USER", "SHELL", "ENV", "BASH_ENV", "NODE_OPTIONS",
           "UV_PROJECT_ENVIRONMENT", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
           "http_proxy", "https_proxy", "all_proxy", "no_proxy", "OPENAI_API_KEY", "OPENAI_BASE_URL",
           "OPENAI_API_BASE", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
-          "CURL_CA_BUNDLE", "CONTROL_DIR", "PUBLIC_ORIGIN", "RUNTIME_TOKEN", "HERMES_TOKEN"}
+          "CURL_CA_BUNDLE", "CONTROL_DIR", "PUBLIC_ORIGIN", "RUNTIME_TOKEN", "HERMES_TOKEN", "PROJECTS_DATABASE_FILE", "PROJECTS_TOKEN", "PROJECTS_TOKEN_FILE"}
 SESSION_ID = re.compile(r"owner_[a-f0-9]{32}\Z")
 MODEL_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,100}\Z")
 NAME = re.compile(r"[A-Z][A-Z0-9_]{1,79}\Z")
@@ -163,6 +164,8 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 async def boundaries(request, call_next):
     upload = request.url.path in {'/api/documents', '/api/audio/file', '/api/quarantine/upload', '/internal/quarantine/upload'}
     limit = (10*1024**2 if request.url.path == '/api/audio/file' else 5*1024**2) if upload else (300_000 if request.url.path == '/api/chat' else (2_000_000 if request.url.path.startswith('/provider/') else 65_536))
+    if request.url.path in {"/api/projects/command", "/internal/projects/command"}:
+        limit = 14 * 1024**2
     try:
         size = int(request.headers.get("content-length", "0"))
     except ValueError:
@@ -639,3 +642,12 @@ register_settings(app, owner, csrf, body, lambda: HERMES, lambda: token("HERMES_
 register_integrations(app, owner, csrf, body, vault, save_vault, lambda: busy.locked())
 register_customization(app, owner, csrf, body, lambda: HERMES, lambda: token('HERMES_TOKEN'))
 register_specialist(app, owner, csrf, body, lambda: HERMES, lambda: token('HERMES_TOKEN'))
+
+
+@app.get('/projects')
+@app.get('/project')
+async def projects_page():
+    # Empty public shell; all records require owner or project-scoped auth.
+    return FileResponse(STATIC / 'projects.html')
+
+register_projects(app, control=CONTROL, owner=owner, csrf=csrf, token=token)
