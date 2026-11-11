@@ -230,6 +230,36 @@ def test_fetch_rejects_redirects_and_streamed_oversize(monkeypatch):
     with pytest.raises(q.Rejected):asyncio.run(q.fetch_public('https://api.github.com.evil.test/x',8))
 
 
+def test_github_fetch_uses_configured_egress_not_ambient_routing(monkeypatch):
+    import asyncio
+    import httpx
+    from app import quarantine as q
+    monkeypatch.setenv('HTTPS_PROXY', 'http://egress:3128')
+    monkeypatch.setenv('HTTP_PROXY', 'http://untrusted.invalid:9999')
+    monkeypatch.setenv('NO_PROXY', '*')
+    original = httpx.AsyncClient
+    def client(**options):
+        assert options.pop('proxy', None) == 'http://egress:3128'
+        assert options['trust_env'] is False and options['follow_redirects'] is False
+        return original(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=b'{}')), **options)
+    monkeypatch.setattr(q.httpx, 'AsyncClient', client)
+    assert asyncio.run(q.fetch_public('https://api.github.com/repos/test/repo', 8)) == b'{}'
+
+
+def test_github_import_has_one_deadline_below_telegram_broker_timeout(monkeypatch):
+    import asyncio
+    from fastapi import HTTPException
+    from app import quarantine as q
+    monkeypatch.setattr(q, 'GITHUB_TIMEOUT', 0.01, raising=False)
+    async def slow_fetch(url, limit):
+        await asyncio.sleep(0.1)
+        return b'{}'
+    monkeypatch.setattr(q, 'fetch_public', slow_fetch)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(q.github_package('https://github.com/test/repo'))
+    assert error.value.status_code == 504
+
+
 def test_same_profile_approval_cannot_replace_existing_skill(portal):
     from app.quarantine import approved_skills
     m,c=portal;h=login(c);first=put(c,h).json();approve(c,h,first)

@@ -221,7 +221,7 @@ def _shared_report(result):
 
 
 def receipt_text(result, config):
-    if result.get('kind') == 'quarantine-list' and set(result) == {'kind','report'}:
+    if result.get('kind') in {'quarantine-list', 'quarantine-error'} and set(result) == {'kind','report'}:
         return _shared_report(result)
     item_id = result.get("id")
     if not isinstance(item_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,96}", item_id):

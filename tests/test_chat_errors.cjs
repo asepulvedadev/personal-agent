@@ -63,6 +63,12 @@ test('HTTP and network failures are safe inline explanations, not raw exception 
   assert.match(text,/Estado|sesión|conexión|tiempo de espera/i);assert.doesNotMatch(text,/sk-secret|\/private/);
  }
 });
+test('rejected inputs and limits are not misreported as disconnected streams',async()=>{
+ for(const [status,expected] of [[400,/solicitud.*rechazada/i],[413,/tamaño permitido/i],[422,/solicitud.*rechazada/i],[429,/solicitudes/i]]){
+  const text=await harness({error:Object.assign(new Error(secret),{status})}).submit();
+  assert.match(text,expected);assert.doesNotMatch(text,/conexión terminó|sk-secret|\/private/);
+ }
+});
 test('reopening native history with missing final answer reports uncertainty without inventing a saved cause',async()=>{
  for(const tail of [[],[{role:'assistant',content:'  '}],[{role:'assistant',content:'',tool_calls:[{id:'t'}]},{role:'tool',content:secret}]]){
   const h=harness({persisted:[{role:'user',content:'hello'},...tail]});await h.ctx.loadConversation(h.ctx.sid);

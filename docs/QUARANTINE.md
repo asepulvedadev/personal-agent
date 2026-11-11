@@ -41,7 +41,10 @@ Existing `POST /api/quarantine/<id>/approve` remains an owner + CSRF administrat
 ## Public GitHub handling
 
 Only credential-free `https://github.com` URLs without query strings, fragments,
-encoded path segments or redirects are accepted. Fixed official GitHub API and
+encoded path segments or redirects are accepted. Downloads explicitly use the operator's
+`HTTPS_PROXY`, as the portal's other external requests do; ambient proxy exclusions,
+credentials and redirect routing remain disabled. The isolated Web container has no
+direct Internet route. Fixed official GitHub API and
 codeload HTTPS endpoints first verify public repository metadata, then resolve a
 40-character immutable commit before downloading its archive. No SSH, git hooks,
 submodules or Git LFS actions run. Redirects, private/unavailable sources and
@@ -52,6 +55,16 @@ The whole archive must pass limits before the selected subtree is inspected.
 This deliberately rejects large repositories even when their selected directory
 is small. Failed remote fetches provide no imported bytes to retain; successfully
 received archive bytes retain commit and path provenance even if analysis blocks.
+
+Metadata, commit resolution and download share a single 15-second deadline, below
+Telegram's 20-second broker request timeout. Failed GitHub imports produce a fixed,
+secret-safe explanation shared by both channels, distinguishing timeout, size limits
+and invalid/unavailable sources. Web retains this explanation in its display-only
+transcript across reload; no new quarantine reference or approval is created for a
+failed download. Internal chat consumers receive `{kind: "quarantine-error", report}`
+with HTTP 200 for this completed failure report, not an import-success receipt. Owner
+administrative import APIs retain their non-2xx failure status. A report must never be
+interpreted as approval or as evidence that an unreceived package was inspected.
 
 ## Limits
 

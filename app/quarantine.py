@@ -18,7 +18,7 @@ import httpx
 from fastapi import HTTPException, Request
 from app.media import file_name, read_upload
 from app.quarantine_worker import inspect_files
-from app.quarantine_assessment import report
+from app.quarantine_assessment import report, import_failure
 
 SOURCE_BYTES = 5 * 1024**2
 MEMBER_BYTES = 512 * 1024
@@ -26,6 +26,8 @@ EXPANDED_BYTES = 8 * 1024**2
 MAX_MEMBERS = 128
 MAX_ITEMS = 100
 MAX_STORAGE = 100 * 1024**2
+# Leave time for analysis and acknowledgement within Telegram's 20-second request.
+GITHUB_TIMEOUT = 15
 PROFILES = {'default', 'carpediev'}
 ID = re.compile(r'[a-f0-9]{32}\Z')
 NOTICE = 'El análisis estático no demuestra que el contenido sea inofensivo. No se ejecutó ni instaló.'
@@ -337,11 +339,12 @@ def github_source(url):
 
 
 async def fetch_public(url, limit):
-    """Fixed official hosts, no credentials, ambient proxy, redirects or unbounded response."""
+    """Fixed official hosts via operator-configured egress; no ambient routing or credentials."""
     parsed = urlsplit(url)
     if parsed.scheme != 'https' or parsed.netloc not in {'api.github.com','codeload.github.com'} or parsed.username or parsed.password:
         raise Rejected('invalid_fetch_host')
-    async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=20) as client:
+    async with httpx.AsyncClient(proxy=os.getenv('HTTPS_PROXY'), trust_env=False,
+                                follow_redirects=False, timeout=20) as client:
         async with client.stream('GET', url, headers={'Accept':'application/vnd.github+json','User-Agent':'personal-agent-quarantine'}) as response:
             if response.status_code != 200:
                 raise Rejected('github_public_source_unavailable')
@@ -359,16 +362,22 @@ async def github_package(url):
     owner, repo, ref, path = github_source(url)
     prefix = 'https://api.github.com/repos/'+owner+'/'+repo
     try:
-        metadata = json.loads(await fetch_public(prefix, 65536))
-        if metadata.get('private') is not False:
-            raise Rejected('public_repository_required')
-        ref = ref or metadata['default_branch']
-        if not isinstance(ref,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', ref):
-            raise Rejected('unsupported_reference')
-        commit = json.loads(await fetch_public(prefix+'/commits/'+quote(ref,safe=''), 262144))['sha']
-        if not isinstance(commit,str) or not re.fullmatch(r'[a-f0-9]{40}', commit):
-            raise Rejected('invalid_commit')
-        data = await fetch_public('https://codeload.github.com/'+owner+'/'+repo+'/zip/'+commit, SOURCE_BYTES)
+        async with asyncio.timeout(GITHUB_TIMEOUT):
+            metadata = json.loads(await fetch_public(prefix, 65536))
+            if metadata.get('private') is not False:
+                raise Rejected('public_repository_required')
+            ref = ref or metadata['default_branch']
+            if not isinstance(ref,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', ref):
+                raise Rejected('unsupported_reference')
+            commit = json.loads(await fetch_public(prefix+'/commits/'+quote(ref,safe=''), 262144))['sha']
+            if not isinstance(commit,str) or not re.fullmatch(r'[a-f0-9]{40}', commit):
+                raise Rejected('invalid_commit')
+            data = await fetch_public('https://codeload.github.com/'+owner+'/'+repo+'/zip/'+commit, SOURCE_BYTES)
+    except (TimeoutError, httpx.TimeoutException) as exc:
+        raise HTTPException(504, 'Se agotó el tiempo de descarga de GitHub. No se instaló contenido.') from exc
+    except Rejected as exc:
+        status = 413 if str(exc) == 'source_size_limit' else 400
+        raise HTTPException(status, 'No se pudo importar el repositorio público dentro de los límites. No se instaló contenido.') from exc
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(400, 'No se pudo importar el repositorio público dentro de los límites. No se instaló contenido.') from exc
     return data, {'kind':'github', 'url':url, 'repository':owner+'/'+repo, 'commit':commit, 'path':path}
@@ -484,7 +493,10 @@ def register_quarantine(app, owner, csrf, control):
         if intake.locked():
             raise HTTPException(409, 'Espera a que termine la importación anterior.')
         async with intake:
-            data, provenance = await github_package(url)
+            try:
+                data, provenance = await github_package(url)
+            except HTTPException as error:
+                return {'kind':'quarantine-error', 'report':import_failure(error.status_code)}
             provenance.update(profile=profile, channel='internal')
             return summary(store.create(data, 'github.zip', provenance))
 

@@ -94,6 +94,11 @@ Content-Type: application/octet-stream
 
 Success responses use HTTP 200/201 and an object with an opaque `id` (8–96 ASCII
 letters/digits/hyphens/underscores), a recognized `state`, and optional `findings` list/dict.
+GitHub download failures instead return HTTP 200 with exactly `kind: "quarantine-error"`
+and a versioned shared `report`. This is a completed failure explanation, not a receipt;
+no new reference, approval or installation exists. The shared broker uses the configured
+egress proxy and a 15-second overall GitHub deadline, leaving time within this client's
+20-second HTTP timeout. Transport or acknowledgement failures still report uncertainty.
 Versioned shared assessments are rendered as bounded plain text (maximum 3,600 characters), including attributed package claims, findings, usability and conditional benefits. Legacy broker responses retain the opaque-receipt fallback. Raw package bodies, code snippets, arbitrary source URLs and broker errors are never reflected. Declared descriptions are normalized, URL-redacted, bounded and labeled untrusted. The guard has no approve endpoint.
 
 If an acknowledgement is uncertain, the owner is directed to inspect the portal before

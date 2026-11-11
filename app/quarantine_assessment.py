@@ -3,6 +3,19 @@ import re
 import unicodedata
 
 
+def import_failure(status):
+    """Only fixed local explanations cross the chat/broker boundary, never exceptions."""
+    reason = {
+        504: 'Se agotó el tiempo de descarga de GitHub. Puedes volver a intentarlo más tarde.',
+        413: 'La fuente supera el tamaño permitido. Adjunta una skill o un ZIP original de hasta 5 MiB.',
+    }.get(status, 'Comprueba que sea un enlace HTTPS público y canónico de GitHub, sin parámetros ni redirecciones, y compatible con los límites de cuarentena.')
+    text = ('Revisión compartida · Hermes Web y Carpediev\n'
+            'No se pudo completar la revisión del enlace de GitHub.\n' + reason + '\n'
+            'Esta solicitud no creó una referencia ni instaló o ejecutó contenido. '
+            'Escribe «cuarentena» para consultar las referencias de solicitudes anteriores.')
+    return {'version':1, 'scope':'shared', 'text':text}
+
+
 def claim(value):
     value = ''.join(c for c in str(value) if not unicodedata.category(c).startswith('C'))
     value = re.sub(r'https?://\S+', '[enlace omitido]', value, flags=re.I)

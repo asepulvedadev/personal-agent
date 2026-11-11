@@ -10,6 +10,7 @@ import time
 from fastapi import HTTPException
 
 from app.quarantine import Quarantine, ID, enforce_chat_intake, github_package, summary, write_new
+from app.quarantine_assessment import import_failure
 
 SESSION = re.compile(r'owner_[a-f0-9]{32}\Z')
 GITHUB = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>`\"']+", re.I)
@@ -115,10 +116,14 @@ class ChatQuarantine:
                 reports.append(self.listing()['report']['text'])
             else:
                 if links:
-                    data, provenance = await github_package(links[0])
-                    item = self.store.create(data, 'github.zip' if provenance['kind']=='github' else provenance['filename'],
-                                             {**provenance,'channel':'web-chat','session_id':sid})
-                    reports.append(summary(item)['report']['text'])
+                    try:
+                        data, provenance = await github_package(links[0])
+                    except HTTPException as error:
+                        reports.append(import_failure(error.status_code)['text'])
+                    else:
+                        item = self.store.create(data, 'github.zip' if provenance['kind']=='github' else provenance['filename'],
+                                                 {**provenance,'channel':'web-chat','session_id':sid})
+                        reports.append(summary(item)['report']['text'])
                 for kind, value in prepared:
                     if kind=='receipt':
                         item=value

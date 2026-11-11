@@ -41,6 +41,9 @@ function chatFailure(code){
     unavailable:'No se pudo establecer la conexión con el agente. Revisa Estado y recarga el historial antes de reintentar.',
     unauthorized:'No se pudo enviar el mensaje con esta sesión. Vuelve a iniciar sesión y revisa el historial antes de reintentar.',
     conflict:'No se pudo iniciar la respuesta. Revisa Estado y la configuración en Secretos; espera si hay otra respuesta en curso.',
+    invalid:'La solicitud fue rechazada antes de iniciar la respuesta. Revisa el enlace, el formato y los límites de los adjuntos.',
+    oversized:'La solicitud supera el tamaño permitido. Reduce el mensaje o los adjuntos antes de enviarlos de nuevo.',
+    limited:'Hay demasiadas solicitudes. Espera un momento antes de volver a intentarlo.',
     missing:'No hay una respuesta final guardada para este turno. El resultado no está confirmado; revisa Estado antes de volver a intentarlo.'
   };
   return typeof code==='string'&&Object.hasOwn(explanations,code)?explanations[code]:explanations.failed;
@@ -239,7 +242,7 @@ $('chat-form').onsubmit=async e=>{e.preventDefault();if(unavailable())return;ski
     });
     if(!terminal&&!explanation)explanation=chatFailure('disconnected');
   }catch(error){
-    const code=error.status===401||error.status===403?'unauthorized':error.status===409?'conflict':error.status===504?'timeout':error.status>=500?'unavailable':'disconnected';
+    const code=error.status===401||error.status===403?'unauthorized':error.status===400||error.status===422?'invalid':error.status===413?'oversized':error.status===429?'limited':error.status===409?'conflict':error.status===504?'timeout':error.status>=500?'unavailable':'disconnected';
     explanation=chatFailure(code);
   }finally{
     const partial=output.textContent;

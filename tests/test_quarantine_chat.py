@@ -56,6 +56,46 @@ def test_bare_github_chat_import_and_global_queue(portal, monkeypatch):
     assert item['id'] in response.text
 
 
+@pytest.mark.parametrize('failure', ['timeout', 'unavailable', 'source_size_limit'])
+def test_github_failures_are_durable_reports_shared_with_telegram(portal, monkeypatch, tmp_path, failure):
+    import httpx
+    from types import SimpleNamespace
+    from app import quarantine as q
+    from runtime.quarantine_ingress import receipt_text
+    mod, client = portal
+    headers = login(client)
+    no_agent(monkeypatch, mod)
+    secret = 'private-value-must-not-appear'
+    async def unavailable(url, limit):
+        if failure == 'timeout':
+            raise httpx.ReadTimeout(secret)
+        if failure == 'unavailable':
+            raise httpx.ConnectError(secret)
+        raise q.Rejected('source_size_limit')
+    monkeypatch.setattr(q, 'fetch_public', unavailable)
+    response = chat(client, headers, 'https://github.com/Nutlope/hallmark')
+    assert response.status_code == 200
+    assert 'run.completed' in response.text and 'assistant.delta' in response.text
+    history = client.get('/api/quarantine/chat/' + SID).json()['messages']
+    text = history[-1]['content']
+    assert 'No se pudo completar la revisión' in text
+    assert 'Esta solicitud no creó una referencia' in text
+    assert secret not in text and not mod.busy.locked()
+    credential = tmp_path/'ingest-token'
+    credential.write_text('synthetic-ingest-credential-long-enough')
+    monkeypatch.setenv('QUARANTINE_INGEST_TOKEN_FILE', str(credential))
+    internal = client.post('/internal/quarantine/github',
+        headers={'Authorization': 'Bearer ' + credential.read_text()},
+        json={'url': 'https://github.com/Nutlope/hallmark', 'profile': 'carpediev'})
+    assert internal.status_code == 200
+    assert internal.json()['kind'] == 'quarantine-error'
+    assert receipt_text(internal.json(), SimpleNamespace(review_url='')) == text
+    assert client.get('/api/quarantine').json()['items'] == []
+    assert not list((mod.CONTROL/'quarantine').glob('*/approved.json'))
+    # A failed intake releases its lock and does not strand later requests.
+    assert 'Revisión compartida' in chat(client, headers, 'cuarentena').text
+
+
 def test_raw_skill_candidate_is_inspected_but_fake_binary_is_refused(portal, monkeypatch):
     mod, client = portal
     no_agent(monkeypatch, mod)
