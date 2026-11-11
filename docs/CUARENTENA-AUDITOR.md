@@ -29,7 +29,11 @@ python3 skills/cuarentena/scripts/review.py SOURCE --format json
 
 It uses fixed public GitHub endpoints without ambient credentials or proxies, pins
 an immutable commit, refuses redirects, verifies source-file blob hashes and passes
-bounded in-memory bytes to the same auditor. Its additive `provenance` field records
+bounded in-memory bytes to the same auditor. Large repositories automatically
+select skill/tool source instead of failing because of an unrelated website or
+media directory. Selection counts and the upstream hash remain in provenance;
+opaque resources and any budget omissions are explicitly uninspected. The transport
+budget is 64 MiB; retained packages remain bounded and cannot be auto-approved. Its additive `provenance` field records
 the selected source and scope. It neither writes candidate files nor activates
 content. Web and Telegram use the same canonical source loader and evidence schema.
 
@@ -114,8 +118,8 @@ remains separate and is not widened by this report.
 ## Bounds and output handling
 
 - Input: 5 MiB; ZIP expanded total: 8 MiB; member/source file: 512 KiB.
-- ZIP: at most 128 members, decompression ratio at most 100:1.
-- Text analysis: at most 128 KiB/file, with explicit truncation/parse gaps.
+- ZIP: at most 512 members, decompression ratio at most 100:1.
+- Text analysis covers accepted members up to 512 KiB/file without an earlier text cutoff; parse and output-evidence gaps remain explicit.
 - Reject ZIP traversal, absolute/Windows paths, backslashes, control/bidi paths,
   duplicate member names, links, special files, encrypted members and nested
   archives. ZIPs are read in bounded memory, never extracted to disk.

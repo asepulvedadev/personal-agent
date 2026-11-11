@@ -81,10 +81,10 @@ def test_all_source_derived_output_is_redacted_including_paths_and_controls():
     assert len(report['inventory'][0]['sha256']) == 64
 
 
-def test_coverage_lists_binary_truncated_and_invalid_python():
+def test_coverage_lists_binary_and_invalid_python_without_early_text_cutoff():
     report = auditor().audit_files({'native.bin': b'\x00\xffbinary', 'large.md': b'x' * (128 * 1024 + 1), 'bad.py': b'def bad(:\n'})
     reasons = ' '.join(x['reason'] for x in report['coverage']['omitted'])
-    assert 'binary' in reasons and 'truncated' in reasons and 'syntax' in reasons
+    assert 'binary' in reasons and 'truncated' not in reasons and 'syntax' in reasons
     assert report['recommendation']['verdict'] == 'review'
     assert report['coverage']['total_files'] == 3
 
@@ -112,7 +112,7 @@ def test_zip_rejects_links_duplicates_nested_and_expansion_bombs():
         module.read_package(make_zip([(link, b'/etc/passwd')]), 'x.zip')
     with pytest.warns(UserWarning):
         duplicate = make_zip([('x.py', b'1'), ('x.py', b'2')])
-    for content in [duplicate, make_zip([('nested.zip', b'PK\x03\x04')]), make_zip([('bomb.txt', b'x' * 400000)]), make_zip([(f'{i}.txt', b'1') for i in range(129)])]:
+    for content in [duplicate, make_zip([('nested.zip', b'PK\x03\x04')]), make_zip([('bomb.txt', b'x' * 400000)]), make_zip([(f'{i}.txt', b'1') for i in range(513)])]:
         with pytest.raises(ValueError):
             module.read_package(content, 'x.zip')
     with pytest.raises(ValueError):

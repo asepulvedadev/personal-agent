@@ -84,7 +84,7 @@ def test_symlinks_limits_corrupt_and_unknown(portal):
     with zipfile.ZipFile(out,'w') as z:
         info=zipfile.ZipInfo('SKILL.md');info.create_system=3;info.external_attr=(stat.S_IFLNK|0o777)<<16
         z.writestr(info,'/etc/passwd')
-    for data in [out.getvalue(),b'not zip',archive([('SKILL.md',b'x'*600000)]),archive([(str(i)+'.md',b'x') for i in range(129)])]:
+    for data in [out.getvalue(),b'not zip',archive([('SKILL.md',b'x'*600000)]),archive([(str(i)+'.md',b'x') for i in range(513)])]:
         assert put(c,h,'skills.zip',data).json()['state']=='blocked'
     assert put(c,h,'file.bin',b'\x00\xff').json()['state']=='review_required'
     assert put(c,h,data=b'x'*(5*1024**2+1)).status_code==413

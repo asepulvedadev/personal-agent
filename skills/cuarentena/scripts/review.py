@@ -37,12 +37,15 @@ async def review(value):
         # Do not publish private absolute filesystem paths in the report.
         provenance={'kind':'local','filename':PurePosixPath(value).name}
     provenance={key:audit.clean_text(value) if isinstance(value,str) else value for key,value in provenance.items()}
-    return {**audit.audit_files(files),'provenance':provenance}
+    result = audit.audit_files(files,provenance)
+    if 'selection' in provenance:
+        provenance['selection'] = result['coverage']['acquisition']
+    return {**result,'provenance':provenance}
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Audit skills/tools without executing, installing or activating them. Accepts an explicit local file, ZIP, or canonical public HTTPS GitHub URL; never reuses credentials, follows redirects or writes candidate files.')
-    parser.add_argument('source',help='Local source file/ZIP, GitHub repository, tree or blob URL. Limits: 5 MiB input, 8 MiB expanded, 128 members; single remote source files ≤512 KiB.')
+    parser.add_argument('source',help='Local source file/ZIP, GitHub repository, tree or blob URL. Large repositories automatically select skill source with explicit coverage. Retained source: 5 MiB input, 8 MiB expanded, 512 members; single remote source files ≤512 KiB.')
     parser.add_argument('--format',choices=('json','text'),default='text')
     args=parser.parse_args(argv)
     try:

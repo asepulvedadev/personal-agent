@@ -28,8 +28,8 @@ except ImportError:  # Python <3.11 can still inspect other sources honestly.
 MAX_INPUT = 5 * 1024 * 1024
 MAX_EXPANDED = 8 * 1024 * 1024
 MAX_MEMBER = 512 * 1024
-MAX_MEMBERS = 128
-MAX_TEXT = 128 * 1024
+MAX_MEMBERS = 512
+MAX_TEXT = MAX_MEMBER
 MAX_RATIO = 100
 MAX_RESULTS = 160
 MAX_EVIDENCE = 8
@@ -542,13 +542,18 @@ def _license(audit, path, text):
         audit.add('licenses', dict(path=path, identifier=identifier))
 
 
-def audit_files(files):
+def audit_files(files, provenance=None):
     """Inspect a filename -> bytes mapping. No imports, execution, network or writes.
 
     All source-derived strings are redacted at the output boundary. Facts describe
     bounded static source inspection, never a malware-free or installable verdict.
     """
     audit = _Audit()
+    selection = (provenance or {}).get('selection')
+    if selection:
+        audit.result['coverage']['acquisition'] = selection
+        audit.omit('[GitHub source selection]',
+                   f"Selected {selection['received_files']} source files; {selection['omitted_files']} scoped resources and {selection['excluded_repository_files']} repository files were not received. This is not a full repository audit.")
     audit.result['coverage']['total_files'] = len(files)
     audit.result['coverage']['total_bytes'] = sum(len(data) for data in files.values() if isinstance(data, bytes))
     expanded = 0
@@ -622,7 +627,7 @@ def read_package(data, name):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             members = archive.infolist()
             if len(members) > MAX_MEMBERS:
-                raise ValueError('ZIP exceeds 128-member limit.')
+                raise ValueError('ZIP exceeds 512-member limit.')
             result, seen, total = {}, set(), 0
             for member in members:
                 name = member.filename
@@ -708,7 +713,7 @@ def render_text(report):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Read-only source auditor: candidate code is never executed, imported, or installed. File/ZIP limits: 5 MiB input, 8 MiB expanded, 512 KiB/member, 128 members, 128 KiB inspected text/file; ZIP ratio max 100:1. No network requests.')
+    parser = argparse.ArgumentParser(description='Read-only source auditor: candidate code is never executed, imported, or installed. File/ZIP limits: 5 MiB input, 8 MiB expanded, 512 KiB/member, 512 members; accepted source members are inspected without a separate text cutoff. ZIP ratio max 100:1. No network requests.')
     parser.add_argument('path', help='Explicit local source file or ZIP; URLs require authorized Web intake.')
     parser.add_argument('--format', choices=('json', 'text'), default='text')
     args = parser.parse_args(argv)

@@ -25,7 +25,7 @@ from skills.cuarentena.scripts.audit import audit_files
 SOURCE_BYTES = 5 * 1024**2
 MEMBER_BYTES = 512 * 1024
 EXPANDED_BYTES = 8 * 1024**2
-MAX_MEMBERS = 128
+MAX_MEMBERS = 512
 MAX_ITEMS = 100
 MAX_STORAGE = 100 * 1024**2
 # Leave time for analysis and acknowledgement within Telegram's 20-second request.
@@ -179,6 +179,8 @@ def analyze(data, name, provenance):
     try:
         files = unpack(data, extension, name, provenance.get('path') if provenance['kind'] == 'github' else None)
         findings, candidates, metadata = inspect_files(files)
+        if provenance.get('selection'):
+            findings.append({'code':'selected_github_source', 'path':'', 'severity':'review'})
         manifest = [{'path':path, 'bytes':len(raw), 'sha256':digest(raw)} for path,raw in sorted(files.items())]
     except Rejected as exc:
         files, candidates, metadata, manifest = {}, [], {}, []
@@ -187,7 +189,7 @@ def analyze(data, name, provenance):
     return {'sha256':digest(data), 'provenance':provenance, 'manifest':manifest,
             'findings':findings, 'candidates':candidates, 'metadata':metadata,
             'state':state, 'eligible':not findings, 'notice':NOTICE, 'plan':PLAN if findings else [],
-            'audit':audit_files(files)}, files
+            'audit':audit_files(files, provenance)}, files
 
 
 class Quarantine:

@@ -74,7 +74,12 @@ def _evidence_lines(item):
     origin = item.get('provenance', {})
     if origin.get('repository'):
         lines.append('Origen: '+claim(origin['repository'])+' · commit '+claim(origin.get('commit','')))
-        lines.append('Alcance: '+claim(origin.get('path') or 'repositorio completo recibido'))
+        selection = origin.get('selection')
+        lines.append('Alcance: '+claim(', '.join(selection['roots']) if selection else origin.get('path') or 'repositorio completo recibido'))
+        if selection:
+            lines.append(f"Selección de fuente: {selection['received_files']} archivos recibidos; {selection['omitted_files']} recurso(s) del alcance no inspeccionados; {selection['excluded_repository_files']} archivos ajenos excluidos. No equivale a revisar todo el repositorio.")
+            if selection.get('roots_total',len(selection['roots']))>len(selection['roots']):
+                lines.append(f"Colección: {selection['roots_total']} raíces de skills; se muestran {len(selection['roots'])} nombres de alcance. Consulta las omisiones de cobertura.")
     lines.append(f"Cobertura: {coverage['inspected_files']}/{coverage['total_files']} archivos inspeccionados; {coverage['total_bytes']} bytes recibidos.")
     for purpose in list(item.get('metadata', {}).values())[:3]:
         lines.append('Declara (declaración no confiable): '+claim(purpose['description']))

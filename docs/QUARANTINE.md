@@ -83,10 +83,20 @@ submodules or Git LFS actions run. Redirects, private/unavailable sources and
 oversized streamed responses fail closed. The fetch helper is injectable in tests;
 the tests make no real source/provider calls.
 
-For a repository/tree URL, the whole archive must pass limits before the selected subtree is inspected.
-This deliberately rejects large repositories even when their selected directory
-is small. Failed remote fetches provide no imported bytes to retain; successfully
-received archive bytes retain commit and path provenance even if analysis blocks.
+Large repository/tree URLs automatically select skill source when the complete
+archive exceeds the retained-package budgets. The trusted loader receives at most
+64 MiB of transport bytes, validates archive metadata without filesystem extraction,
+finds SKILL.md roots within the requested scope, and retains their source plus root
+manifests/license context. Websites outside those roots and opaque media/binary
+assets are not decompressed. When no skill is present, source selection covers the
+requested tool/repository scope. Unsafe paths, links, encryption and expansion
+bombs remain refused; errors are never silently treated as completed checks.
+
+Selection provenance records immutable commit, upstream archive fingerprint,
+selected roots, received/omitted resource counts and excluded repository files.
+Reports explicitly distinguish selected source from a full-repository audit.
+Partial source packages can be investigated but never approved for activation.
+Failed remote fetches provide no imported bytes to retain.
 
 A supported `blob/REF/path` URL retrieves exactly that regular source file at the
 resolved immutable commit, verifies its Git blob fingerprint and declared size, and
@@ -110,8 +120,8 @@ interpreted as approval or as evidence that an unreceived package was inspected.
 ## Limits
 
 - Input: 5 MiB; expanded archive: 8 MiB; each member: 512 KiB.
-- At most 128 archive entries, depth 8, 240-character ASCII paths, ratio 100:1.
-- Text analysis: 128 KiB per file; larger text requires additional review.
+- At most 512 archive entries, depth 8, 240-character ASCII paths, ratio 100:1.
+- Text analysis covers every accepted source member up to 512 KiB; there is no separate 128 KiB cutoff.
 - At most 100 imports and 100 MiB storage, with a conservative record reservation.
   Full storage refuses new intake without deleting evidence. No automatic purge.
 - Absolute/traversal/Windows paths, device names, trailing dots/spaces, duplicate

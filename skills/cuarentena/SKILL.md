@@ -21,6 +21,8 @@ For a local source file, ZIP, or canonical public GitHub URL, run the trusted he
 python3 scripts/review.py SOURCE --format json
 ```
 
+Large GitHub repositories automatically select the skill/tool source, including scripts and references, rather than treating unrelated website assets as the review package. Inspect `coverage.acquisition` and selection provenance: excluded resources are not reviewed, and a partial source package must never be approved as the original complete package.
+
 This is the authorized read-only intake helper, not a package installer. It uses only the standard library, validates public GitHub provenance and immutable commits, refuses redirects and unsafe archives, and never executes candidate code. It does not reuse GitHub tokens, cookies, proxy credentials, or SSH sessions. `scripts/audit.py PATH --format json` is the strictly offline variant. Directories are not traversed. Keep outputs outside active skill directories; do not substitute `git clone`, shell downloaders or arbitrary URL fetches.
 
 ## Interpret the evidence
