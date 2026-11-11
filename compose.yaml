@@ -25,6 +25,8 @@ services:
     environment:
       PUBLIC_ORIGIN: https://alvaro.2.24.115.58.sslip.io
       CONTROL_DIR: /control
+      PROJECTS_DATABASE_FILE: /run/projects/database.json
+      PROJECTS_TOKEN_FILE: /run/projects/service-token
       RUNTIME_TOKEN_FILE: /run/runtime-auth/token
       HERMES_TOKEN_FILE: /run/runtime-auth/hermes-token
       QUARANTINE_INGEST_TOKEN_FILE: /run/runtime-auth/quarantine-token
@@ -33,11 +35,13 @@ services:
       HTTPS_PROXY: http://egress:3128
     volumes:
       - /srv/personal-agent/control:/control
+      - /srv/personal-agent/projects-db/web:/run/projects:ro
       - /srv/personal-agent/runtime-auth:/run/runtime-auth:ro
       - /srv/personal-agent/portal-bootstrap:/run/portal-bootstrap:ro
     networks:
       runtime: {ipv4_address: 172.30.40.3}
       front: {ipv4_address: 172.30.42.2, aliases: [personal-agent-web]}
+      projects_db: {ipv4_address: 172.30.43.2}
     healthcheck:
       test: ['CMD', 'python', '-c', 'import urllib.request; [urllib.request.urlopen("http://127.0.0.1:8080"+p,timeout=3).close() for p in ("/health","/static/app.js")]']
       interval: 30s
@@ -103,3 +107,6 @@ networks:
   front:
     internal: true
     ipam: {config: [{subnet: 172.30.42.0/28}]}
+  projects_db:
+    external: true
+    name: personal-agent_projects-db

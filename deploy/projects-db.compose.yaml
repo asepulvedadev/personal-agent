@@ -1,0 +1,38 @@
+# Administrator-provisioned once; intentionally separate from release --remove-orphans.
+name: personal-agent-projects
+services:
+  database:
+    image: postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
+    container_name: personal-agent-projects-db
+    user: '999:999'
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 96
+    shm_size: 128m
+    tmpfs: ['/tmp:rw,noexec,nosuid,nodev,size=64m,uid=999,gid=999', '/var/run/postgresql:rw,noexec,nosuid,nodev,size=8m,uid=999,gid=999']
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+      POSTGRES_DB: personal_projects
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - /srv/personal-agent/projects-db/data:/var/lib/postgresql/data
+      - /srv/personal-agent/projects-db/secrets/postgres-password:/run/secrets/postgres-password:ro
+    networks:
+      database: {ipv4_address: 172.30.43.3, aliases: [projects-db]}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d personal_projects']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+networks:
+  database:
+    name: personal-agent_projects-db
+    internal: true
+    ipam: {config: [{subnet: 172.30.43.0/29}]}
