@@ -31,6 +31,34 @@ def assistant_config():
     }
 
 
+def enable_image_generation(config: dict, *platforms: str) -> None:
+    """Bind native images to the private relay without replacing unrelated tools."""
+    toolsets = config.setdefault('platform_toolsets', {})
+    if not isinstance(toolsets, dict):
+        raise ValueError('Platform toolsets must be a mapping')
+    for platform in platforms:
+        tools = toolsets.setdefault(platform, [])
+        if not isinstance(tools, list) or not all(isinstance(tool, str) for tool in tools):
+            raise ValueError('Platform toolsets must contain tool name lists')
+        if 'image_gen' not in tools:
+            tools.append('image_gen')
+    # Replace only the owned image route; never inherit an API key/custom endpoint.
+    config['image_gen'] = {
+        'provider': 'openai', 'model': 'gpt-image-2-medium',
+        'openai': {'model': 'gpt-image-2-medium', 'base_url': 'http://web:8080/provider/v1',
+                   'key_env': 'OPENAI_API_KEY'},
+    }
+    # Bundled backends auto-load; only an explicit disable can suppress OpenAI.
+    plugins = config.get('plugins', {})
+    if not isinstance(plugins, dict):
+        raise ValueError('Plugin configuration must be a mapping')
+    if 'disabled' in plugins:
+        disabled = plugins['disabled']
+        if not isinstance(disabled, list) or not all(isinstance(name, str) for name in disabled):
+            raise ValueError('Disabled plugins must contain plugin name lists')
+        plugins['disabled'] = [name for name in disabled if name not in {'openai', 'image_gen/openai'}]
+
+
 def runtime_config(model: str, *, owner_config: dict | None = None) -> dict:
     """Generate project defaults while keeping all model calls on the private relay."""
     relay = {'provider': 'openai-api', 'api_mode': 'codex_responses',
@@ -57,6 +85,12 @@ def runtime_config(model: str, *, owner_config: dict | None = None) -> dict:
             config['mcp_servers'] = deepcopy(owner_config['mcp_servers'])
         if owner_config.get('approvals', {}).get('mode') == 'off':
             config['approvals']['mode'] = 'off'
+        if 'platform_toolsets' in owner_config:
+            if not isinstance(owner_config['platform_toolsets'], dict):
+                raise ValueError('Platform toolsets must be a mapping')
+            config['platform_toolsets'].update(deepcopy(owner_config['platform_toolsets']))
+        if 'plugins' in owner_config:
+            config['plugins'] = deepcopy(owner_config['plugins'])
     if owner_config is not None:
         try:
             from .config_files import editable_values
@@ -64,6 +98,7 @@ def runtime_config(model: str, *, owner_config: dict | None = None) -> dict:
             from config_files import editable_values
         for section, values in editable_values(owner_config).items():
             config.setdefault(section, {}).update(values)
+    enable_image_generation(config, 'api_server')
     return config
 
 

@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from app.media import register_media, attachment_message
+from app.images import register_images
 from app.quarantine import register_quarantine, approved_skills
 from app.quarantine_chat import events as quarantine_events
 from app.models import CATALOG, selection, enforce_selection
@@ -366,6 +367,18 @@ async def provider_check(request: Request):
     return {"ok": True, "model": v["model"], "note": "Acceso a la clave y al modelo verificado. La generación y el saldo se comprueban por separado."}
 
 
+def provider_gate():
+    now = time.time()
+    provider_attempts[:] = [t for t in provider_attempts if now-t < 60]
+    if len(provider_attempts) >= 40:
+        raise HTTPException(429, "Se alcanzó el límite de solicitudes al proveedor.")
+    provider_attempts.append(now)
+
+
+# Exact route precedes the existing wildcard provider router.
+register_images(app, owner, service, body, vault, CONTROL, provider_gate)
+
+
 @app.api_route("/provider/v1/{path:path}", methods=["GET", "POST"])
 async def provider(request: Request, path: str):
     service(request)
@@ -374,11 +387,7 @@ async def provider(request: Request, path: str):
     v = vault()
     if not v["openai_key"]:
         raise HTTPException(503, "La clave de OpenAI no está configurada.")
-    now = time.time()
-    provider_attempts[:] = [t for t in provider_attempts if now-t < 60]
-    if len(provider_attempts) >= 40:
-        raise HTTPException(429, "Se alcanzó el límite de solicitudes al proveedor.")
-    provider_attempts.append(now)
+    provider_gate()
     payload = None
     if request.method == "POST":
         if path not in {"chat/completions", "responses"}:

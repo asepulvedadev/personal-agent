@@ -1,12 +1,12 @@
 /* A deliberately small Markdown view. Source is data, never HTML or application state. */
 (function(root){
   'use strict';
-  const sources=new WeakMap();
+  const sources=new WeakMap(),imageViews=new WeakMap();
   function text(parent,value,document){
     const node=document.createElement('span');node.textContent=value;parent.append(node);
   }
-  function inline(parent,value,document){
-    // Images and links are matched whole and retained as text, never resources or controls.
+  function inline(parent,value,document,media){
+    // Only opaque private registry URLs may load. External resources stay literal text.
     const tokens=/`([^`\n]+)`|\*\*([^*\n]+)\*\*|(!?)\[([^\]\n]*)\]\(([^\s)\n]+)\)/g;
     let offset=0,match;
     while((match=tokens.exec(value))){
@@ -14,6 +14,21 @@
       let node=null;
       if(match[1]!==undefined){node=document.createElement('code');node.textContent=match[1];}
       else if(match[2]!==undefined){node=document.createElement('strong');node.textContent=match[2];}
+      else if(match[3]==='!'&&/^\/api\/images\/[a-f0-9]{32}$/.test(match[5])){
+        const url=match[5],id=url.slice('/api/images/'.length);
+        node=media.previous.get(url);
+        if(!node){
+          node=document.createElement('span');node.setAttribute('class','generated-image');
+          const image=document.createElement('img');
+          image.setAttribute('src',url);image.setAttribute('alt',(match[4]||'Imagen generada').slice(0,160));
+          image.setAttribute('loading','lazy');image.setAttribute('decoding','async');
+          image.setAttribute('referrerpolicy','no-referrer');
+          const download=document.createElement('a');download.setAttribute('href',url);
+          download.setAttribute('download','imagen-'+id+'.png');download.textContent='Descargar imagen';
+          node.append(image,download);
+        }
+        media.next.set(url,node);
+      }
       if(node)parent.append(node);else text(parent,match[0],document);
       offset=tokens.lastIndex;
     }
@@ -27,6 +42,7 @@
     if(typeof source!=='string')source='';
     sources.set(target,source);
     const document=target.ownerDocument||root.document;
+    const media={previous:imageViews.get(target)||new Map(),next:new Map()};
     const lines=source.replace(/\r\n?/g,'\n').split('\n'),nodes=[];
     let index=0;
     while(index<lines.length){
@@ -45,7 +61,7 @@
       const title=line.match(heading);
       if(title||labelHeading.test(line)){
         const node=document.createElement('h'+(title?Math.min(6,title[1].length+1):3));
-        inline(node,title?title[2]:line,document);nodes.push(node);index++;continue;
+        inline(node,title?title[2]:line,document,media);nodes.push(node);index++;continue;
       }
       const item=line.match(bullet);
       if(item){
@@ -54,15 +70,16 @@
         while(index<lines.length){
           const current=lines[index].match(bullet);
           if(!current||/^\d/.test(current[1])!==ordered)break;
-          const entry=document.createElement('li');inline(entry,current[2],document);list.append(entry);index++;
+          const entry=document.createElement('li');inline(entry,current[2],document,media);list.append(entry);index++;
         }
         nodes.push(list);continue;
       }
       const paragraph=[];
       while(index<lines.length&&lines[index].trim()&&!heading.test(lines[index])&&!labelHeading.test(lines[index])&&!bullet.test(lines[index])&&!fence.test(lines[index]))paragraph.push(lines[index++]);
-      const node=document.createElement('p');inline(node,paragraph.join('\n'),document);nodes.push(node);
+      const node=document.createElement('p');inline(node,paragraph.join('\n'),document,media);nodes.push(node);
     }
     target.replaceChildren(...nodes);
+    imageViews.set(target,media.next);
     return target;
   }
   const api={render,source:target=>sources.get(target)??''};

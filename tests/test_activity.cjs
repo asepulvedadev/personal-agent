@@ -68,6 +68,8 @@ test('la vista usa texto, muestra la actividad y nunca inserta argumentos o resu
   const text=el=>el.textContent+' '+el.children.map(text).join(' ');
   assert.match(text(container),/Skill · research/);assert.match(text(container),/En curso/);
   v.finish('disconnected');assert.match(text(container),/Sin confirmación/);
+  v.event('tool.started',{tool_name:'image_generate',tool_call_id:'image-1'});
+  assert.match(text(container),/Generar imagen/);
   assert.doesNotMatch(text(container),/private|secret/);
  }finally{global.document=old;}
 });

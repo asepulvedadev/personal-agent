@@ -5,9 +5,9 @@ from pathlib import Path
 import re
 
 try:
-    from workspace_config import runtime_config, _directory, _write
+    from workspace_config import runtime_config, enable_image_generation, _directory, _write
 except ImportError:
-    from runtime.workspace_config import runtime_config, _directory, _write
+    from runtime.workspace_config import runtime_config, enable_image_generation, _directory, _write
 
 OWNER='7139153140'
 BOT='9272502356'
@@ -67,6 +67,8 @@ def prepare(home, base, relay_token):
             raise ValueError('Invalid Carpediev configuration')
         defaults.update(existing)
         defaults.setdefault('platform_toolsets',{}).setdefault('telegram',base['platform_toolsets']['api_server'][:])
+    defaults['platform_toolsets'].setdefault('api_server', base['platform_toolsets']['api_server'][:])
+    enable_image_generation(defaults, 'api_server', 'telegram')
     _write(path,json.dumps(defaults,indent=2),replace=path.exists())
     conf=copy.deepcopy(base)
     conf['multiplex_profiles']=True

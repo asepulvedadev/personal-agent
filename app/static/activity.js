@@ -2,7 +2,7 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.HermesActivity=api;})(typeof globalThis==='object'?globalThis:this,function(){
  'use strict';
  const labels={running:'En curso',completed:'Finalizada',failed:'Con error',recorded:'Resultado registrado',unconfirmed:'Sin confirmación',stopped:'Detenida'};
- const tools={terminal:'Terminal',web_search:'Búsqueda web',web_extract:'Lectura web',browser_navigate:'Navegador',browser_snapshot:'Lectura del navegador',browser_click:'Interacción con el navegador',skill_view:'Consultar skill',skills_list:'Listar skills',skill_manage:'Gestionar skills',delegate_task:'Delegar tarea',memory:'Memoria',session_search:'Buscar conversaciones',file_read:'Leer archivo',file_write:'Escribir archivo',file_edit:'Editar archivo',execute_code:'Ejecutar código'};
+ const tools={image_generate:'Generar imagen',terminal:'Terminal',web_search:'Búsqueda web',web_extract:'Lectura web',browser_navigate:'Navegador',browser_snapshot:'Lectura del navegador',browser_click:'Interacción con el navegador',skill_view:'Consultar skill',skills_list:'Listar skills',skill_manage:'Gestionar skills',delegate_task:'Delegar tarea',memory:'Memoria',session_search:'Buscar conversaciones',file_read:'Leer archivo',file_write:'Escribir archivo',file_edit:'Editar archivo',execute_code:'Ejecutar código'};
  function safeName(value){return typeof value==='string'&&/^[A-Za-z][A-Za-z0-9_.\/-]{0,99}$/.test(value)&&!value.includes('..')&&!/^(sk-|key-|bearer|gh[pousr]_)/i.test(value)?value:null;}
  function callId(value){return typeof value==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(value)&&!/^sk-/i.test(value)?value:null;}
  function skillName(tool,args){

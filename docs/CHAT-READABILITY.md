@@ -8,7 +8,9 @@ Web assistant replies now use restrained typographic structure instead of displa
 - Bold emphasis, inline code and fenced code, including an unfinished streamed fence.
 - Links and URLs remain readable, literal text rather than navigation controls.
 
-HTML and image syntax stay visible text. Images never load; HTML is never parsed. No source text becomes a link or interactive control, including HTTP(S), unsafe URL schemes or credentials in URLs. Code is not executed or syntax-highlighted.
+HTML is never parsed. External image syntax and links stay visible text, including HTTP(S), unsafe URL schemes and credentials in URLs. The sole image exception is a strict relative `/api/images/<32 lowercase hexadecimal characters>` registry URL: it displays a private generated PNG and a same-origin download control. The endpoint requires owner authentication; arbitrary URLs and filesystem paths cannot load. Code is not executed or syntax-highlighted.
+
+Generated image nodes are reused during streaming so later text does not repeatedly request the same image. Reloaded messages retain the same private registry reference. Images inside fenced code remain literal examples.
 
 ## Source and outcomes
 

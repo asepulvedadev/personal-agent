@@ -51,6 +51,25 @@ test('HTTP(S), credential URLs and all other links stay visible without creating
  assert.match(el.textContent,/https:\/\/plain.test/);
 });
 
+test('only private generated-image registry URLs render images and download controls',()=>{
+ const id='a'.repeat(32),url='/api/images/'+id,el=target();
+ const raw='![Una taza]( '+url+' )';
+ Renderer.render(el,'![Una taza]('+url+')');
+ const image=walk(el).find(node=>node.tagName==='img'),link=walk(el).find(node=>node.tagName==='a');
+ assert.ok(image);assert.equal(image.attributes.src,url);assert.equal(image.attributes.alt,'Una taza');
+ assert.equal(image.attributes.referrerpolicy,'no-referrer');
+ assert.equal(link.attributes.href,url);assert.equal(link.attributes.download,'imagen-'+id+'.png');
+ const original=image;
+ Renderer.render(el,'![Una taza]('+url+')\n\nLista.');
+ assert.equal(walk(el).find(node=>node.tagName==='img'),original,'streaming reuses the image resource');
+ const reloaded=target();Renderer.render(reloaded,Renderer.source(el));assert.deepEqual(tree(el),tree(reloaded));
+ for(const unsafe of ['https://evil.test'+url,'//evil.test'+url,url+'?token=secret',url+'/../vault',url+'#fragment','/api/images/'+'A'.repeat(32),'/api/images/short','data:image/png;base64,aaa']){
+  Renderer.render(el,'![No cargar]('+unsafe+')');assert.ok(walk(el).every(node=>!['img','a'].includes(node.tagName)),unsafe);
+ }
+ Renderer.render(el,'```\n![Código]('+url+')\n```');assert.ok(walk(el).every(node=>node.tagName!=='img'));
+ Renderer.render(el,raw);assert.ok(walk(el).every(node=>node.tagName!=='img'));
+});
+
 test('every streamed prefix and reload keep exactly the original raw source',()=>{
  const raw='## Resultado\r\n\r\n**Todavía parcial** y `valor`.\n\n- Uno\n- Dos\n\n```js\nconst html = "<img src=x>";\n```\n\n[Más](https://example.test)';
  const streamed=target(),saved=target();let accumulated='';

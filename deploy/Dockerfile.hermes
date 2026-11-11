@@ -27,6 +27,8 @@ COPY runtime/patch_config_files.py /opt/runtime/patch_config_files.py
 RUN python /opt/runtime/patch_config_files.py
 COPY runtime/quarantine_ingress.py runtime/patch_quarantine.py /opt/runtime/
 RUN python /opt/runtime/patch_quarantine.py /opt/hermes
+COPY runtime/patch_images.py /opt/runtime/patch_images.py
+RUN python /opt/runtime/patch_images.py /opt/hermes
 USER 10001:10001
 WORKDIR /workspace
 CMD ["/opt/hermes/.venv/bin/python", "/opt/runtime/supervisor.py"]
