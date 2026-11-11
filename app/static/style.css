@@ -61,3 +61,19 @@ button.icon-button svg,.file-button.icon-button svg,a.icon-button svg{fill:none;
 @media(prefers-reduced-motion:reduce){#config-dialog::backdrop{backdrop-filter:none}}
 
 .config-profile-picker{display:flex;align-items:center;gap:12px;margin-top:16px}.config-profile-picker label{font-size:11px;color:var(--muted)}#config-profile{min-height:44px;max-width:100%;min-width:170px;padding:9px 34px 9px 12px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:9px;font:inherit;font-size:12px;line-height:1.5;color-scheme:dark}#config-profile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}#config-profile:disabled{opacity:.6}@media(max-width:600px){.config-profile-picker{gap:10px;margin-top:12px}#config-profile{min-width:0;flex:1}.config-header>div{min-width:0;width:100%}}
+
+/* Quiet editorial hierarchy for answers; user messages retain their plain-text layout. */
+.assistant-content{min-width:0;max-width:70ch;white-space:normal;overflow-wrap:anywhere;font-size:16px;line-height:1.8}
+.assistant-content p{margin:0 0 1em;white-space:pre-wrap}
+.assistant-content h2,.assistant-content h3,.assistant-content h4,.assistant-content h5,.assistant-content h6{margin:1.6em 0 .65em;color:var(--text);font-weight:650;line-height:1.4;letter-spacing:-.25px}
+.assistant-content h2{font-size:23px}.assistant-content h3{font-size:19px}.assistant-content h4,.assistant-content h5,.assistant-content h6{font-size:16px}
+.assistant-content ul,.assistant-content ol{margin:.35em 0 1.2em;padding-left:1.5em}
+.assistant-content li{padding-left:.2em;margin:.45em 0;white-space:pre-wrap}
+.assistant-content li::marker{color:var(--muted)}.assistant-content strong{font-weight:650;color:var(--text)}
+.assistant-content code{padding:.12em .35em;border:1px solid var(--line);border-radius:5px;background:var(--surface);font:.84em/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.assistant-content pre{max-width:100%;margin:1.1em 0 1.4em;padding:16px 18px;overflow:auto;overscroll-behavior-x:contain;border:1px solid var(--line);border-radius:10px;background:var(--surface);white-space:pre;line-height:1.7;tab-size:2}
+.assistant-content pre code{display:block;padding:0;border:0;border-radius:0;background:transparent;white-space:pre;overflow-wrap:normal;font-size:13px}
+.assistant-content a{text-decoration:underline;text-decoration-color:var(--muted);text-underline-offset:3px}.assistant-content a:hover{color:var(--accent);text-decoration-color:currentColor}
+.assistant-content .message-explanation{border-left:2px solid var(--accent);padding:4px 0 4px 14px;margin-top:1.25em;color:var(--muted);font-size:14px;line-height:1.7}
+.assistant-content>:first-child{margin-top:0}.assistant-content>:last-child{margin-bottom:0}
+@media(max-width:600px){.message.assistant{padding-right:0}.assistant-content{font-size:15px;line-height:1.75}.assistant-content h2{font-size:21px}.assistant-content h3{font-size:18px}.assistant-content pre{padding:13px 14px}.assistant-content pre code{font-size:12px}}
