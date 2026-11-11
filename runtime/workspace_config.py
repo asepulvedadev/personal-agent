@@ -59,6 +59,17 @@ def enable_image_generation(config: dict, *platforms: str) -> None:
         plugins['disabled'] = [name for name in disabled if name not in {'openai', 'image_gen/openai'}]
 
 
+def enable_projects(config: dict, *platforms: str) -> None:
+    """Expose the narrow shared API without giving agents database credentials."""
+    toolsets = config.setdefault('platform_toolsets', {})
+    for platform in platforms:
+        tools = toolsets.setdefault(platform, [])
+        if not isinstance(tools, list) or not all(isinstance(item, str) for item in tools):
+            raise ValueError('Platform toolsets must contain tool name lists')
+        if 'personal_projects' not in tools:
+            tools.append('personal_projects')
+
+
 def runtime_config(model: str, *, owner_config: dict | None = None) -> dict:
     """Generate project defaults while keeping all model calls on the private relay."""
     relay = {'provider': 'openai-api', 'api_mode': 'codex_responses',
@@ -99,6 +110,7 @@ def runtime_config(model: str, *, owner_config: dict | None = None) -> dict:
         for section, values in editable_values(owner_config).items():
             config.setdefault(section, {}).update(values)
     enable_image_generation(config, 'api_server')
+    enable_projects(config, 'api_server')
     return config
 
 
