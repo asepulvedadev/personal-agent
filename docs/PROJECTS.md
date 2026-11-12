@@ -185,3 +185,20 @@ portal test-fixture findings were inspected, with no live credential found.
 Risk: item 2 (project-only CSP media allowance); existing download authorization
 and script/default restrictions are unchanged. Production verification remains a
 separate release step.
+
+## Action controls and task-writing boundary
+
+Project action controls (close, download, preview, edit, attach, time, save and
+sharing actions) show SVG line icons only, with accessible names, native title
+hints and 44 by 44 CSS pixel targets. Labels track playback and saving states;
+reduced motion disables spinner animation. Project/contact/task names and
+navigation tabs remain readable content, even if a name matches an action.
+Desktop and 375px client-view checks confirmed playback and no dialog overflow.
+All 87 Node tests and 39 scoped Python tests passed; independent verification
+caught a recent-deliverable title collision, now covered by a regression test.
+
+Task descriptions, evidence and notes should describe the task's business goal,
+actual solution, tests and unresolved task-specific questions. Codec details,
+voice-generation IDs, compositor tools and production/revision logs belong in
+internal production artifacts, not task notes or client-facing comments. Final
+approved evidence videos remain attached to their respective tasks.
