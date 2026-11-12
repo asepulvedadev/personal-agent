@@ -696,3 +696,10 @@ button,input,textarea {
     transition:background .16s,border-color .16s,color .16s;
   }
 }
+
+/* Video previews reuse scoped attachment downloads, without exposing share tokens. */
+.document-content { flex:1; min-width:0; overflow-wrap:anywhere; }
+.document-row { align-items:flex-start; }
+.document-row>.actions { flex-shrink:0; }
+.document-video { display:block; width:100%; max-height:420px; margin-top:16px; background:#111; border-radius:8px; }
+@media(max-width:700px) { .document-row>.actions { width:100%; } }

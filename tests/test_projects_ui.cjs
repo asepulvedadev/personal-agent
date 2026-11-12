@@ -50,6 +50,8 @@ function mount({client=false,project={},contacts=[],projects=[],failure=null,res
   constructor(tag,doc){this.tagName=tag;this.doc=doc;this.children=[];this.listeners={};this.attrs={};this.dataset={};this.style={};this.value='';this._text='';this.open=false;this.isConnected=true;}
   set textContent(v){this._text=String(v);this.children=[];}get textContent(){return this._text+this.children.map(x=>x.textContent||'').join('');}
   append(...nodes){this.children.push(...nodes);}prepend(node){this.children.unshift(node);}
+  contains(node){return node===this||this.all().includes(node);}
+  click(){this.clicked=true;}remove(){this.isConnected=false;}pause(){this.paused=true;}load(){}
   replaceChildren(...nodes){this.children=nodes;this._text='';}
   setAttribute(k,v){this.attrs[k]=v;}removeAttribute(k){delete this.attrs[k];}
   addEventListener(k,v){(this.listeners[k]??=[]).push(v);}
@@ -60,11 +62,12 @@ function mount({client=false,project={},contacts=[],projects=[],failure=null,res
   get elements(){return {namedItem:name=>this.all().find(e=>e.name===name)};}
  }
  const nodes=new Map();const doc={readyState:'complete',createElement:tag=>new Element(tag,doc),querySelector:selector=>{if(!nodes.has(selector))nodes.set(selector,new Element('div',doc));return nodes.get(selector);}};
+ const urls=[],revoked=[];doc.body=new Element('body',doc);
  const calls=[],history=[];doc.activeElement=doc.querySelector('#content');
- const context={document:doc,location:{pathname:client?'/project':'/projects',hash:client?'#bearer-secret':'',origin:'https://private.example'},history:{replaceState:(...a)=>history.push(a)},crypto:require('node:crypto').webcrypto,queueMicrotask,setTimeout,URL,Blob,Uint8Array,console,
+ const context={document:doc,location:{pathname:client?'/project':'/projects',hash:client?'#bearer-secret':'',origin:'https://private.example'},history:{replaceState:(...a)=>history.push(a)},crypto:require('node:crypto').webcrypto,queueMicrotask,setTimeout,URL:{createObjectURL:blob=>{const url=URL.createObjectURL(blob);urls.push({url,blob});return url;},revokeObjectURL:url=>{revoked.push(url);URL.revokeObjectURL(url);}},Blob,Uint8Array,console,
  fetch:async(path,options)=>{calls.push({path,options});if(responder){const response=responder(path,options);if(response)return response;}if(failure)return {ok:false,status:failure};return {ok:true,json:async()=>path==='/api/me'?{csrf:'owner-csrf'}:path==='/api/projects'?{contacts,projects}:path==='/api/projects/command'?{contact:{id:'new'}}:{project}};}};
  vm.runInNewContext(fs.readFileSync('app/static/projects.js','utf8'),context);
- return {nodes,calls,history,doc,settle:()=>new Promise(r=>setImmediate(r)),find:(root,label)=>root.all().find(e=>e.tagName==='button'&&e.textContent===label)};
+ return {nodes,calls,history,doc,urls,revoked,settle:()=>new Promise(r=>setImmediate(r)),find:(root,label)=>root.all().find(e=>e.tagName==='button'&&e.textContent===label)};
 }
 test('client bootstrap retains fragment for reload, makes no owner requests and renders read-only controls',async()=>{
  const f=mount({client:true,project:{name:'<script>unsafe</script>',status:'active',tasks:[{id:'t',title:'Visible task',status:'todo',priority:'normal',approval:'pending',comments:[],time_entries:[]}],groups:[],documents:[]}});await f.settle();
@@ -149,4 +152,31 @@ test('client skip navigation preserves the bearer fragment and focuses content',
 
 test('mobile task filters remain readable rather than squeezing into thirds',()=>{
  const css=fs.readFileSync('app/static/projects.css','utf8');assert.match(css,/@media\(max-width:600px\)[\s\S]*\.toolbar\s*\{\s*flex-direction:column;/);
+});
+
+function videoProject(){return {id:'p',name:'Video work',status:'active',groups:[],documents:[{id:'v',task_id:'t',name:'G1.mp4',media_type:'video/mp4',size:20,visible:true},{id:'h',name:'Unsafe.html',media_type:'text/html'}],tasks:[{id:'t',title:'Verified task',status:'done',resolution:'Verified',evidence:'Recording',comments:[],time_entries:[]}]};}
+test('client task video loads lazily through scoped bearer; closing releases media and download stays available',async()=>{
+ const f=mount({client:true,project:videoProject(),responder:path=>path.includes('/documents/')?{ok:true,blob:async()=>new Blob(['video bytes'],{type:'application/octet-stream'})}:null});await f.settle();
+ assert.equal(f.calls.some(c=>c.path.includes('/documents/')),false);
+ const task=f.nodes.get('#content').all().find(e=>e.className==='task');await task.dispatch('click');
+ const body=f.nodes.get('#dialog-body');await f.find(body,'Ver video').dispatch('click');
+ const request=f.calls.find(c=>c.path.includes('/documents/'));assert.equal(request.path,'/api/project-view/documents/v');assert.equal(request.options.headers.Authorization,'Bearer bearer-secret');assert.equal(request.options.credentials,'omit');
+ const video=body.querySelector('video');assert.ok(video);assert.equal(video.controls,true);assert.equal(video.preload,'metadata');assert.equal(video.autoplay,undefined);assert.equal(f.urls[0].blob.type,'video/mp4');assert.equal(video.src,f.urls[0].url);assert.ok(f.find(body,'Descargar'));
+ await f.find(body,'Ocultar video').dispatch('click');assert.ok(f.revoked.includes(video.src));
+ await f.find(body,'Ver video').dispatch('click');const second=f.urls.at(-1).url;
+ await f.nodes.get('#dialog-close').dispatch('click');assert.ok(f.revoked.includes(second));
+ const rows=f.nodes.get('#content').all().filter(e=>e.className==='document-row');assert.equal(f.find(rows.find(r=>r.textContent.includes('Unsafe.html')),'Ver video'),undefined);
+});
+test('owner preview preserves authenticated download behavior and safely reports playback failures',async()=>{
+ const project=videoProject();let denied=true;
+ const f=mount({project,projects:[project],responder:path=>path.includes('/documents/')?denied?{ok:false,status:401}:{ok:true,blob:async()=>new Blob(['bytes'])}:null});await f.settle();await f.find(f.nodes.get('#content'),'Video work').dispatch('click');
+ const row=f.nodes.get('#content').all().find(e=>e.className==='document-row');await f.find(row,'Ver video').dispatch('click');assert.match(row.textContent,/Inicia sesión/);assert.equal(f.urls.length,0);assert.equal(f.find(row,'Ver video').disabled,false);
+ denied=false;await f.find(row,'Ver video').dispatch('click');const request=f.calls.find(c=>c.path.includes('/documents/'));assert.equal(request.path,'/api/projects/p/documents/v');assert.equal(request.options.credentials,'same-origin');assert.equal(request.options.headers.Authorization,undefined);
+ await row.querySelector('video').dispatch('error');assert.match(row.textContent,/Descargar/);assert.ok(f.find(row,'Descargar'));await f.find(row,'Ocultar video').dispatch('click');
+ await f.find(row,'Descargar').dispatch('click');assert.equal(f.doc.body.children.at(-1).download,'G1.mp4');
+});
+test('closing task during video fetch cancels preview without leaking object URLs',async()=>{
+ let finish;const pending=new Promise(resolve=>finish=resolve);
+ const f=mount({client:true,project:videoProject(),responder:path=>path.includes('/documents/')?{ok:true,blob:()=>pending}:null});await f.settle();await f.nodes.get('#content').all().find(e=>e.className==='task').dispatch('click');
+ const loading=f.find(f.nodes.get('#dialog-body'),'Ver video').dispatch('click');await f.settle();await f.nodes.get('#dialog-close').dispatch('click');finish(new Blob(['video']));await loading;await f.settle();assert.equal(f.urls.length,0);
 });
