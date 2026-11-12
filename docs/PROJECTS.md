@@ -38,6 +38,11 @@ Actions and data:
   hours remain unknown, not invented historical entries.
 - `add_comment`: task_id, text, kind(comment|question|answer), visible(boolean).
 - `add_time`: task_id, date, minutes(positive integer), note, visible(boolean).
+- `update_time` (owner Web only): task_id, entry_id, date, minutes(positive integer),
+  note. Corrects an existing task-local entry without changing its ID, original
+  attribution, creation date or visibility. Uses the same validation as `add_time`;
+  stale revisions and invalid entries fail without changes. Services and shared
+  client views cannot correct entries, including by replaying an owner's command.
 - `start_timer`: task_id, note. `stop_timer`: task_id; uses actual server elapsed
   time, one active timer per actor, no invented historic time.
 - `add_document`: task_id(nullable), name, media_type, content_base64, visible.
@@ -53,6 +58,15 @@ media_type,size,sha256,visible,created_at}], shares[{id,label,created_at,revoked
 audit[{action,actor,at,revision}]. Comments/time entries include id, actor, created_at
 and their declared fields. Index projects include task_count, done_count,
 tracked_minutes, estimated_minutes(nullable), latest update.
+
+### Completing tasks and recording time later
+
+Completion requires the actual resolution and evidence, not a time entry. The owner
+can finish a verified task with unknown hours, then open that task and use the clock
+icon to record the real work date and minutes. Each existing time entry has a pencil
+icon to correct its date, minutes and description. Saving updates the task/project
+totals, preserves its existing sharing setting and does not reopen the finished
+task. Unknown hours remain unrecorded; estimates never become historical time.
 
 Client portal: GET `/project` serves a public empty shell. Token stays in fragment
 `/project#TOKEN`, never query/path/referrer. GET `/api/project-view` with
