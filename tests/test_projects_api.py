@@ -124,3 +124,16 @@ def test_service_document_requires_dedicated_token_and_project_scope(api):
     assert client.get(path,headers=headers).content == b'x'
     other = create(client)
     assert client.get(path.replace(p['id'],other['id']),headers=headers).status_code == 404
+
+
+def test_only_owner_can_move_attachment_to_project(api):
+    client, workspace, _ = api
+    client.cookies.set('owner','yes');p = create(client)
+    p = workspace.command({'action':'add_document','operation_id':uid(),'project_id':p['id'],'revision':p['revision'],'data':{'name':'File','content_base64':'eA=='}})['project']
+    payload = {'action':'move_document_to_project','operation_id':uid(),'project_id':p['id'],'revision':p['revision'],'data':{'document_id':p['documents'][0]['id']}}
+    headers = {'authorization':'Bearer service-secret','x-project-actor':'carpediev'}
+    assert client.post('/internal/projects/command',json=payload,headers=headers).status_code == 403
+    assert client.post('/api/projects/command',json=payload).status_code == 403
+    assert workspace.get(p['id']) == p
+    assert client.post('/api/projects/command',json=payload,headers=auth()).status_code == 200
+    assert client.post('/internal/projects/command',json=payload,headers=headers).status_code == 403

@@ -80,6 +80,7 @@
     function el(tag,text,className){const node=document.createElement(tag);if(text!=null)node.textContent=String(text);if(className)node.className=className;return node;}
     function append(parent,...children){children.filter(Boolean).forEach(child=>parent.append(child));return parent;}
     const ICONS={
+      archive:'M3 3h18v4H3V3ZM5 7v14h14V7M10 11h4',
       close:'M18 6 6 18M6 6l12 12',download:'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
       play:'m8 5 12 7-12 7V5Z',hide:'m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 4.2A11 11 0 0 1 21 12a16 16 0 0 1-3 4M6.6 6.6A16 16 0 0 0 3 12s3 8 9 8a10 10 0 0 0 5-1.4',
       plus:'M12 5v14M5 12h14',edit:'m16 3 5 5-12 12-6 1 1-6L16 3ZM14 5l5 5',
@@ -94,6 +95,7 @@
       busy:'M12 3a9 9 0 1 1-9 9'
     };
     const ACTION_ICONS={
+      'Mover al proyecto':'archive','Mover archivo':'archive',
       'Cerrar ventana':'close','Cancelar':'close','Descargar':'download','Ver video':'play','Ocultar video':'hide',
       'Configurar':'settings','Compartir':'share','Compartir con cliente':'share','Hacer interno':'lock',
       'Nueva tarea':'plus','Nuevo proyecto':'plus','Nuevo contacto':'plus','Añadir grupo':'plus',
@@ -254,6 +256,7 @@
         const row=el('div',null,'document-row'),body=el('div',null,'document-content');
         append(body,el('h3',d.name),el('small',`${Math.ceil((d.size||0)/1024)} KB${!client?(d.visible?' · Compartido':' · Interno'):''}`,'hint'));
         const controls=actions(button('Descargar',async()=>{const blob=await api.download(project.id,d.id);const url=URL.createObjectURL(blob);const a=el('a');a.href=url;a.download=d.name||'documento';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}),!client?visibilityToggle('document',d,taskId):null);
+        if(!client&&d.task_id)controls.append(button('Mover al proyecto',()=>archiveDocumentForm(d,taskId)));
         // Only passive video formats get a player; other attachments remain download-only.
         if(['video/mp4','video/webm','video/ogg'].includes(d.media_type)){
           const player=el('div',null,'document-preview'),notice=el('p','','hint');notice.setAttribute('role','status');
@@ -279,6 +282,12 @@
         }
         append(row,body,controls);parent.append(row);
       }
+    }
+    function archiveDocumentForm(document,taskId){
+      if(document.visible&&!project.tasks.find(t=>t.id===document.task_id)?.visible){showError(Error('Marca primero este archivo como interno: moverlo desde una tarea no compartida podría ampliar su acceso.'));return;}
+      form('Mover al proyecto',[],async()=>{
+        await command('move_document_to_project',{document_id:document.id});if(taskId)taskDetails(taskId);else close();
+      },{submit:'Mover archivo',hint:`«${document.name}» se retirará de la tarea y quedará en los documentos del proyecto. El archivo no se elimina y conserva su privacidad actual.`,back:taskId?()=>taskDetails(taskId):null});
     }
     function documentForm(taskId=''){
       form('Adjuntar documento privado',[field('file','Archivo',null,'file',{required:true,wide:true}),choose('task_id','Vincular a tarea',taskId,[['','Documento del proyecto'],...(project.tasks||[]).map(t=>[t.id,`${t.code?t.code+' · ':''}${t.title}`])]),check('visible','Permitir descarga al cliente')],async data=>{

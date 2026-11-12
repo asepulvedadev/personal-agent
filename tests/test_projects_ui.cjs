@@ -202,3 +202,21 @@ test('recent deliverable task titles are content even when matching an action',a
  const project=videoProject();project.tasks[0].title='Descargar';project.tasks[0].code='';
  const f=mount({client:true,project});await f.settle();const recent=f.nodes.get('#content').all().find(e=>e.tagName==='section'&&e.textContent.includes('Entregables recientes'));const entry=recent.all().find(e=>e.tagName==='button');assert.equal(entry.textContent,'Descargar');assert.equal(entry.querySelector('svg'),undefined);
 });
+
+test('owner can move a draft out of a task to the internal project archive; client cannot',async()=>{
+ let project=videoProject();project.documents[0].name='Draft.mp4';project.documents[0].visible=false;
+ const f=mount({project,projects:[project],responder:(path,opts)=>{
+   if(path!=='/api/projects/command')return null;const body=JSON.parse(opts.body);assert.equal(body.action,'move_document_to_project');assert.equal(body.data.document_id,'v');
+   project=structuredClone(project);project.documents[0].task_id=null;return {ok:true,json:async()=>({project})};
+ }});await f.settle();await f.find(f.nodes.get('#content'),'Video work').dispatch('click');await f.nodes.get('#content').all().find(e=>e.className==='task').dispatch('click');
+ const body=f.nodes.get('#dialog-body');const archive=f.find(body,'Mover al proyecto');assert.ok(archive);assert.equal(archive.textContent,'');await archive.dispatch('click');
+ const form=body.querySelector('form');assert.match(form.textContent,/no se elimina/);await form.dispatch('submit');
+ assert.equal(body.all().some(e=>e.className==='document-row'&&e.textContent.includes('Draft.mp4')),false);
+ assert.equal(project.documents[0].task_id,null);assert.equal(project.documents[0].visible,false);
+ const client=mount({client:true,project:videoProject()});await client.settle();assert.equal(client.find(client.nodes.get('#content'),'Mover al proyecto'),undefined);
+});
+
+test('moving a visible file out of a hidden task explains the privacy boundary',async()=>{
+ const project=videoProject();project.tasks[0].visible=false;const f=mount({project,projects:[project]});await f.settle();await f.find(f.nodes.get('#content'),'Video work').dispatch('click');await f.nodes.get('#content').all().find(e=>e.className==='task').dispatch('click');
+ const body=f.nodes.get('#dialog-body');await f.find(body,'Mover al proyecto').dispatch('click');assert.match(body.textContent,/Marca primero este archivo como interno/);assert.equal(f.calls.some(c=>c.path==='/api/projects/command'),false);
+});

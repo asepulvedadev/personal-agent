@@ -306,7 +306,9 @@ class Projects:
         operation_id = identity(command.get('operation_id'))
         data = command.get('data', {})
         if not isinstance(data, dict): fail()
-        # Share mutation authorization precedes operation replay, including cross-actor IDs.
+        # Owner-only authorization precedes operation replay, including cross-actor IDs.
+        if action == 'move_document_to_project' and (actor != 'owner' or client_token is not None):
+            fail('Solo el propietario puede mover archivos.',403)
         if action in {'create_share','revoke_share'} and actor != 'owner': fail('Solo el propietario puede compartir.',403)
         fingerprint = hashlib.sha256(json.dumps(command,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
         created_file = None
@@ -474,6 +476,13 @@ class Projects:
                 created.unlink(missing_ok=True)
                 raise
             p['documents'].append(document)
+        elif action == 'move_document_to_project':
+            fields(data,{'document_id'})
+            document = find(p['documents'],data.get('document_id'))
+            if document['task_id'] is not None and document['visible'] and not find(p['tasks'],document['task_id'])['visible']:
+                fail('Marca el archivo como interno antes de moverlo desde una tarea no compartida.')
+            # Preserve file bytes and effective privacy; remove only the task association.
+            document['task_id'] = None
         elif action == 'set_visibility':
             fields(data,{'kind','id','visible'})
             kind = choice(data.get('kind'),{'document','comment','time'})
