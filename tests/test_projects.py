@@ -115,6 +115,64 @@ def test_timer_actual_elapsed_and_one_per_actor(workspace):
     assert workspace.index()['projects'][0]['tracked_minutes'] == 17
 
 
+def test_completed_task_can_record_and_correct_time_later(workspace):
+    p = command(workspace,'create_project',{'name':'Work','tasks':[{'title':'Done','status':'done',
+        'resolution':'Implemented','evidence':'Verified','visible':True}]})['project']
+    task_id = p['tasks'][0]['id']
+    assert p['tasks'][0]['time_entries'] == []
+    p = command(workspace,'add_time',{'task_id':task_id,'date':'2026-11-10','minutes':15,
+        'note':'Actual work','visible':True},p)['project']
+    original = copy.deepcopy(p['tasks'][0]['time_entries'][0])
+    payload = {'action':'update_time','project_id':p['id'],'revision':p['revision'],'operation_id':uid(),
+        'data':{'task_id':task_id,'entry_id':original['id'],'date':'2026-11-11','minutes':45,'note':'Corrected work'}}
+    result = workspace.command(payload)
+    assert workspace.command(payload) == result
+    task = result['project']['tasks'][0]
+    assert task['status'] == 'done'
+    assert task['time_entries'] == [{**original,'date':'2026-11-11','minutes':45,'note':'Corrected work'}]
+    assert workspace.index()['projects'][0]['tracked_minutes'] == 45
+    assert workspace.client_get(command(workspace,'create_share',{'label':'Client'},result['project'])['share']['token'])['tasks'][0]['time_entries'][0]['minutes'] == 45
+
+
+@pytest.mark.parametrize('bad', [{'minutes':0},{'minutes':True},{'date':'2026-02-30'},
+    {'entry_id':uid()},{'visible':True},{'actor':'other'}])
+def test_invalid_time_correction_is_atomic(workspace,bad):
+    p = command(workspace,'create_project',{'name':'Work','tasks':[{'title':'Task'}]})['project']
+    p = command(workspace,'add_time',{'task_id':p['tasks'][0]['id'],'date':'2026-11-10','minutes':15},p)['project']
+    data = {'task_id':p['tasks'][0]['id'],'entry_id':p['tasks'][0]['time_entries'][0]['id'],
+        'date':'2026-11-11','minutes':20,'note':'Work',**bad}
+    before = copy.deepcopy(workspace.store.state)
+    with pytest.raises(ProjectError): command(workspace,'update_time',data,p)
+    assert workspace.store.state == before
+
+
+def test_time_correction_is_owner_only_and_scoped(workspace):
+    p = command(workspace,'create_project',{'name':'Work','tasks':[{'title':'One'},{'title':'Two'}]})['project']
+    p = command(workspace,'add_time',{'task_id':p['tasks'][0]['id'],'date':'2026-11-10','minutes':15},p)['project']
+    data = {'task_id':p['tasks'][0]['id'],'entry_id':p['tasks'][0]['time_entries'][0]['id'],
+        'date':'2026-11-11','minutes':20,'note':'Work'}
+    shared = command(workspace,'create_share',{'label':'Client'},p)
+    p = shared['project']
+    payload = {'action':'update_time','project_id':p['id'],'revision':p['revision'],'operation_id':uid(),'data':data}
+    result = workspace.command(payload)
+    before = copy.deepcopy(workspace.store.state)
+    for actor in ('hermes-web','carpediev'):
+        with pytest.raises(ProjectError) as e: workspace.command(payload,actor)
+        assert e.value.status == 403
+    with pytest.raises(ProjectError) as e: workspace.command(payload,client_token=shared['share']['token'])
+    assert e.value.status == 403
+    with pytest.raises(ProjectError) as e: command(workspace,'update_time',data,p)
+    assert e.value.status == 409
+    p = result['project']
+    with pytest.raises(ProjectError): command(workspace,'update_time',{**data,'task_id':p['tasks'][1]['id']},p)
+    assert workspace.store.state == before
+    other = command(workspace,'create_project',{'name':'Other','tasks':[{'title':'Other'}]})['project']
+    before_other = copy.deepcopy(workspace.store.state)
+    with pytest.raises(ProjectError): command(workspace,'update_time',{**data,'task_id':other['tasks'][0]['id']},other)
+    assert workspace.store.state == before_other
+    assert workspace.get(p['id']) == p
+
+
 def test_shares_client_comment_redaction_and_revocation(workspace):
     p = command(workspace,'create_project',{'name':'Project','tasks':[{'title':'Visible','visible':True,'internal_notes':'secret'},
         {'title':'Hidden','internal_notes':'secret'}]})['project']

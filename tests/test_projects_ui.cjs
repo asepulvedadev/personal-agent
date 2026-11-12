@@ -100,6 +100,30 @@ test('task form requires real completion evidence and keeps draft on revision co
  assert.equal(body.action,'add_task');assert.equal(body.revision,4);assert.equal(body.data.group_id,null);assert.equal(body.data.estimated_minutes,null);assert.equal(body.data.visible,false);
  assert.equal(form.elements.namedItem('title').value,'Actual work');assert.match(form.textContent,/Otra sesión/);assert.ok(f.find(form,'Recargar datos (descarta este formulario)'));
 });
+test('owner adds and edits hours on a completed task without reopening it',async()=>{
+ let project={id:'p',revision:1,name:'Work',status:'active',groups:[],documents:[],tasks:[{id:'t',title:'Completed',status:'done',resolution:'Done',evidence:'Tested',time_entries:[],comments:[]}]};
+ const f=mount({project,projects:[project],responder:(path,opts)=>{
+  if(path!=='/api/projects/command')return null;
+  const body=JSON.parse(opts.body);assert.equal(body.revision,project.revision);project=structuredClone(project);
+  if(body.action==='add_time')project.tasks[0].time_entries.push({id:'e',...body.data});
+  else {assert.equal(body.action,'update_time');assert.equal(body.data.entry_id,'e');assert.equal('visible' in body.data,false);Object.assign(project.tasks[0].time_entries[0],body.data);}
+  project.revision++;return {ok:true,json:async()=>({project})};
+ }});await f.settle();await f.find(f.nodes.get('#content'),'Work').dispatch('click');
+ await f.nodes.get('#content').all().find(e=>e.className==='task').dispatch('click');
+ assert.match(f.nodes.get('#dialog-body').textContent,/Sin horas registradas/);
+ await f.find(f.nodes.get('#dialog-body'),'Registrar tiempo').dispatch('click');
+ let form=f.nodes.get('#dialog-body').querySelector('form');form.elements.namedItem('date').value='2026-11-11';form.elements.namedItem('minutes').value='30';form.elements.namedItem('note').value='Actual work';form.elements.namedItem('visible').checked=true;
+ await form.dispatch('submit');
+ const edit=f.find(f.nodes.get('#dialog-body'),'Editar registro de tiempo');assert.ok(edit);assert.equal(edit.textContent,'');assert.equal(edit.title,'Editar registro de tiempo');
+ await edit.dispatch('click');form=f.nodes.get('#dialog-body').querySelector('form');
+ assert.equal(form.elements.namedItem('minutes').value,30);assert.equal(form.elements.namedItem('date').value,'2026-11-11');assert.equal(form.elements.namedItem('note').value,'Actual work');
+ form.elements.namedItem('minutes').value='45';form.elements.namedItem('note').value='Corrected work';await form.dispatch('submit');
+ assert.equal(project.tasks[0].status,'done');assert.equal(project.tasks[0].time_entries.length,1);assert.equal(project.tasks[0].time_entries[0].visible,true);assert.match(f.nodes.get('#dialog-body').textContent,/45 min/);
+});
+test('client time entries have no edit action',async()=>{
+ const f=mount({client:true,project:{id:'p',name:'Work',status:'active',groups:[],documents:[],tasks:[{id:'t',title:'Completed',status:'done',time_entries:[{id:'e',minutes:15,date:'2026-11-11',visible:true}],comments:[]}]}});await f.settle();
+ await f.nodes.get('#content').all().find(e=>e.className==='task').dispatch('click');assert.equal(f.find(f.nodes.get('#dialog-body'),'Editar registro de tiempo'),undefined);
+});
 test('share retry without once-only secret presents revoke action, never an undefined token link',async()=>{
  const project={id:'p',revision:1,name:'Work',status:'active',groups:[],tasks:[],documents:[],shares:[]};
  const f=mount({project,projects:[project],responder:path=>path==='/api/projects/command'?{ok:true,json:async()=>({project:{...project,revision:2,shares:[{id:'s',label:'Client'}]},share:{id:'s'}})}:null});await f.settle();

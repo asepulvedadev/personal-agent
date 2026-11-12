@@ -309,6 +309,8 @@ class Projects:
         # Owner-only authorization precedes operation replay, including cross-actor IDs.
         if action == 'move_document_to_project' and (actor != 'owner' or client_token is not None):
             fail('Solo el propietario puede mover archivos.',403)
+        if action == 'update_time' and (actor != 'owner' or client_token is not None):
+            fail('Solo el propietario puede corregir registros de tiempo.',403)
         if action in {'create_share','revoke_share'} and actor != 'owner': fail('Solo el propietario puede compartir.',403)
         fingerprint = hashlib.sha256(json.dumps(command,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
         created_file = None
@@ -406,7 +408,7 @@ class Projects:
                 task = find(p['tasks'],editable.pop('task_id',None))
                 edit_task(task,editable)
             check_group(p,task['group_id'])
-        elif action in {'add_comment','add_time','start_timer','stop_timer'}:
+        elif action in {'add_comment','add_time','update_time','start_timer','stop_timer'}:
             task = find(p['tasks'],data.get('task_id'))
             if client and not task['visible']: fail('No se encontró el recurso.',404)
             if action == 'add_comment':
@@ -415,16 +417,19 @@ class Projects:
                     'kind':choice(data.get('kind','comment'),{'comment','question','answer'}),
                     'visible':True if client else boolean(data.get('visible',False))}
                 task['comments'].append(entry)
-            elif action == 'add_time':
-                fields(data,{'task_id','date','minutes','note','visible'})
+            elif action in {'add_time','update_time'}:
+                fields(data,{'task_id','date','minutes','note'} | ({'visible'} if action == 'add_time' else {'entry_id'}))
                 work_date = data.get('date')
                 if not isinstance(work_date,str): fail()
                 try:
                     if date.fromisoformat(work_date).isoformat() != work_date: fail()
                 except ValueError: fail('Fecha inválida.')
-                task['time_entries'].append({'id':uid(),'actor':actor,'created_at':stamp,'date':work_date,
-                    'minutes':integer(data.get('minutes'),1),'note':text(data.get('note','')),
-                    'visible':boolean(data.get('visible',False))})
+                values = {'date':work_date,'minutes':integer(data.get('minutes'),1),'note':text(data.get('note',''))}
+                if action == 'add_time':
+                    task['time_entries'].append({'id':uid(),'actor':actor,'created_at':stamp,**values,
+                        'visible':boolean(data.get('visible',False))})
+                else:
+                    find(task['time_entries'],data.get('entry_id')).update(values)
             elif action == 'start_timer':
                 fields(data,{'task_id','note'})
                 # Actor transaction advisory lock prevents concurrent starts on different projects.
