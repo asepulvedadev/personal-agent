@@ -88,10 +88,13 @@
     function heading(title,description,actions){const h=el('div',null,'heading'),left=el('div');append(left,el('h1',title),description?el('p',description):null);append(h,left,actions);return h;}
     function actions(...items){return append(el('div',null,'actions'),...items);}
     function section(title,extra){const s=el('section',null,'section');append(s,append(el('div',null,'section-heading'),el('h2',title),extra));return s;}
-    function open(title){if(!dialog.open)returnFocus=document.activeElement;$('#dialog-title').textContent=title;dialogBody.replaceChildren();if(!dialog.open)dialog.showModal();dialog.scrollTop=0;}
+    const mediaViews=new Set();
+    function releaseMedia(root){for(const view of [...mediaViews])if(!root||root.contains(view.parent))view.release();}
+    globalThis.addEventListener?.('pagehide',()=>releaseMedia());
+    function open(title){releaseMedia(dialogBody);if(!dialog.open)returnFocus=document.activeElement;$('#dialog-title').textContent=title;dialogBody.replaceChildren();if(!dialog.open)dialog.showModal();dialog.scrollTop=0;}
     function close(){dialog.close();}
     $('#dialog-close').addEventListener('click',close);
-    dialog.addEventListener('close',()=>{dialogBody.replaceChildren();if(returnFocus?.isConnected)returnFocus.focus();else $('#workspace').focus();});
+    dialog.addEventListener('close',()=>{releaseMedia(dialogBody);dialogBody.replaceChildren();if(returnFocus?.isConnected)returnFocus.focus();else $('#workspace').focus();});
     $('#owner-nav').hidden=client;$('#client-label').hidden=!client;
     if(client){$('#home-link').removeAttribute('href');$('#privacy-note').textContent='Vista privada del proyecto. El acceso puede revocarse.';}
     function form(title,fields,onSave,{submit='Guardar cambios',hint='',back=null}={}){
@@ -131,7 +134,7 @@
     async function loadIndex(){message('Cargando proyectos y contactos…');const result=await api.index();contacts=result.contacts||[];projects=result.projects||[];project=null;renderIndex();message('');}
     async function loadProject(projectId){message('Cargando proyecto…');const result=await api.project(projectId);if(project?.id!==result.project?.id){filter='';groupFilter='';}project=result.project;renderProject();message('');}
     function renderIndex(){
-      content.replaceChildren();const tabs=el('div',null,'tabs');
+      releaseMedia(content);content.replaceChildren();const tabs=el('div',null,'tabs');
       for(const [value,label] of [['projects','Proyectos'],['contacts','Contactos y clientes']]){const b=button(label,()=>{tab=value;renderIndex();});b.setAttribute('aria-pressed',tab===value);tabs.append(b);}
       content.append(heading(tab==='projects'?'Tu trabajo, en perspectiva.':'Relaciones con contexto.',tab==='projects'?'Propuestas, avances y decisiones. Un espacio para saber qué sigue.':'Del primer contacto al proyecto compartido.',actions(button(tab==='projects'?'Nuevo proyecto':'Nuevo contacto',()=>tab==='projects'?projectForm():contactForm(),'primary'))),tabs);
       if(tab==='contacts'){renderContacts();return;}
@@ -157,7 +160,7 @@
       values.forEach(([value,label],i)=>{const m=el('div',null,'metric');append(m,el('strong',value),el('span',label));if(!i){const progress=el('progress');progress.max=100;progress.value=s.percent;progress.setAttribute('aria-label',`${s.done} de ${s.total} tareas terminadas`);m.append(progress,el('small',`${s.done} de ${s.total} tareas terminadas`,'hint'));}row.append(m);});return row;
     }
     function renderProject(){
-      content.replaceChildren();if(!project){content.append(empty('El proyecto no está disponible.'));return;}
+      releaseMedia(content);content.replaceChildren();if(!project){content.append(empty('El proyecto no está disponible.'));return;}
       if(!client)content.append(button('← Todos los proyectos',loadIndex,'link'));
       const controls=client?null:actions(button('Configurar',()=>projectForm(project)),button('Compartir',sharePanel),button('Nueva tarea',()=>taskForm(),'primary'));
       content.append(heading(project.name,project.description,controls));
@@ -214,7 +217,35 @@
     function visibilityToggle(kind,item,taskId){return button(item.visible?'Hacer interno':'Compartir con cliente',async()=>{await command('set_visibility',{kind,id:item.id,visible:!item.visible});if(taskId)taskDetails(taskId);},'link');}
     function renderDocuments(parent,documents,taskId=null){
       if(!documents.length){parent.append(el('p','No hay documentos disponibles en esta vista.','hint'));return;}
-      for(const d of documents){const row=el('div',null,'document-row'),body=el('div');append(body,el('h3',d.name),el('small',`${Math.ceil((d.size||0)/1024)} KB${!client?(d.visible?' · Compartido':' · Interno'):''}`,'hint'));append(row,body,button('Descargar',async()=>{const blob=await api.download(project.id,d.id);const url=URL.createObjectURL(blob);const a=el('a');a.href=url;a.download=d.name||'documento';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}),!client?visibilityToggle('document',d,taskId):null);parent.append(row);}
+      for(const d of documents){
+        const row=el('div',null,'document-row'),body=el('div',null,'document-content');
+        append(body,el('h3',d.name),el('small',`${Math.ceil((d.size||0)/1024)} KB${!client?(d.visible?' · Compartido':' · Interno'):''}`,'hint'));
+        const controls=actions(button('Descargar',async()=>{const blob=await api.download(project.id,d.id);const url=URL.createObjectURL(blob);const a=el('a');a.href=url;a.download=d.name||'documento';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}),!client?visibilityToggle('document',d,taskId):null);
+        // Only passive video formats get a player; other attachments remain download-only.
+        if(['video/mp4','video/webm','video/ogg'].includes(d.media_type)){
+          const player=el('div',null,'document-preview'),notice=el('p','','hint');notice.setAttribute('role','status');
+          let view=null;
+          const toggle=button('Ver video',async()=>{
+            if(view){view.release();return;}
+            toggle.disabled=true;notice.textContent='Cargando video…';
+            const current={parent:body,cancelled:false,url:null,video:null,release(){
+              this.cancelled=true;if(this.video){this.video.pause();this.video.removeAttribute('src');this.video.load();}
+              if(this.url)URL.revokeObjectURL(this.url);mediaViews.delete(this);if(view===this)view=null;
+              player.replaceChildren();notice.textContent='';toggle.textContent='Ver video';toggle.disabled=false;toggle.setAttribute('aria-expanded','false');
+            }};view=current;mediaViews.add(current);
+            try{
+              // Reuse the authorized download: bearer stays in the header, never in a media URL.
+              const blob=await api.download(project.id,d.id);if(current.cancelled)return;
+              current.url=URL.createObjectURL(new Blob([blob],{type:d.media_type}));
+              const video=el('video',null,'document-video');current.video=video;video.controls=true;video.preload='metadata';video.playsInline=true;video.src=current.url;video.setAttribute('aria-label',`Video: ${d.name}`);
+              video.addEventListener('error',()=>{notice.textContent='No se pudo reproducir este video. Usa Descargar para abrirlo en tu equipo.';});
+              player.append(video);notice.textContent='';toggle.textContent='Ocultar video';toggle.setAttribute('aria-expanded','true');
+            }catch(error){if(!current.cancelled){current.release();notice.textContent=error.message||'No se pudo cargar el video. Puedes volver a intentarlo.';}}
+            finally{toggle.disabled=false;}
+          });toggle.setAttribute('aria-expanded','false');controls.prepend(toggle);append(body,player,notice);
+        }
+        append(row,body,controls);parent.append(row);
+      }
     }
     function documentForm(taskId=''){
       form('Adjuntar documento privado',[field('file','Archivo',null,'file',{required:true,wide:true}),choose('task_id','Vincular a tarea',taskId,[['','Documento del proyecto'],...(project.tasks||[]).map(t=>[t.id,`${t.code?t.code+' · ':''}${t.title}`])]),check('visible','Permitir descarga al cliente')],async data=>{

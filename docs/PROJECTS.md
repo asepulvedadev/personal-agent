@@ -151,3 +151,37 @@ body allocation. Observed RED then GREEN; independent probes checked eight
 negative owner/service/Origin/CSRF/actor combinations plus retained authorized
 uploads. Full local verification: 607 Python and 80 Node tests passed. No live
 project data, source attachments or credentials are included in this repository.
+
+## Task video evidence
+
+Task-linked MP4, WebM and Ogg video attachments offer **Ver video** and
+**Descargar** in both owner and client views. Preview loads only on request,
+with native playback/seek/volume/fullscreen controls and no autoplay. Unsupported
+formats remain download-only; playback failures keep the download available.
+The existing authorized attachment endpoint is reused, including client bearer
+headers and task/document visibility checks. A local Blob URL contains no share
+token. No new public media endpoint or change to download response headers is
+needed. The project HTML shells alone permit `blob:` in CSP `media-src`;
+script and default source policies stay unchanged. Closing a task, hiding the video or leaving the view releases the player
+and its Blob URL, including cancelled in-flight previews. Downloaded/cached bytes
+cannot be recalled after access is revoked; subsequent requests are reauthorized.
+The existing 10 MiB attachment limit still applies.
+
+Validation checkpoint (2026-11-11): 22 focused UI tests and all 83 Node tests
+passed; 116 portal/media/project API/runtime tests passed with one existing
+Starlette/httpx deprecation warning. Real G1 (46.4 s) and D4 (42 s) MP4 files
+played to completion in a local client-view fixture; preview also played with
+the scoped CSP enabled. Client download bytes matched the source SHA-256 hashes.
+These checks do not establish production rollout; inline playback is pending
+owner-authorized deployment and verification with an existing client access.
+
+Release validation (2026-11-12): rebased onto current main without changing other
+features; 608 Python tests passed, three optional integration tests skipped, and
+83 Node tests passed. The first local full-suite attempt hit two skill-seeding
+failures caused by generated Python bytecode; the clean source archive with
+`PYTHONDONTWRITEBYTECODE=1` passed, matching CI. Independent security review found
+no observed blocker. Secret scanning detected its synthetic canary; six existing
+portal test-fixture findings were inspected, with no live credential found.
+Risk: item 2 (project-only CSP media allowance); existing download authorization
+and script/default restrictions are unchanged. Production verification remains a
+separate release step.

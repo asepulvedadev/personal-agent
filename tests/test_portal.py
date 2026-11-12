@@ -275,3 +275,16 @@ def test_chat_transport_errors_are_sanitized_and_release_lock(portal, failure, c
             assert closed
     finally:
         m.app.state.internal=original
+
+
+def test_project_video_blob_policy_is_scoped_without_allowing_blob_scripts(portal):
+    _, client = portal
+    for path in ('/project', '/projects'):
+        response = client.get(path)
+        assert response.status_code == 200
+        policy = response.headers['Content-Security-Policy']
+        assert "media-src 'self' blob:" in policy
+        assert "script-src 'self';" in policy
+        assert "default-src 'self';" in policy
+    for path in ('/', '/health', '/api/me'):
+        assert 'blob:' not in client.get(path).headers['Content-Security-Policy']
