@@ -214,3 +214,43 @@ def test_client_replay_reprojects_current_visibility_without_new_mutation(worksp
     replay=workspace.client_comment(share['share']['token'],payload)
     assert replay['project']['tasks']==[] and replay['project']['documents']==[]
     assert workspace.store.state==before
+
+
+@pytest.mark.parametrize('visible',[False,True])
+def test_owner_archives_task_attachment_without_changing_bytes_or_tasks(workspace,visible):
+    p = command(workspace,'create_project',{'name':'Project','tasks':[{'title':'Task','visible':True}]})['project']
+    task_id = p['tasks'][0]['id']
+    p = command(workspace,'add_document',{'name':'Draft.mp4','task_id':task_id,'media_type':'video/mp4','content_base64':'ZHJhZnQ=','visible':visible},p)['project']
+    result = command(workspace,'create_share',{'label':'Client'},p);p = result['project'];token = result['share']['token']
+    before = copy.deepcopy(p);document_id = p['documents'][0]['id'];operation_id = uid()
+    archived = command(workspace,'move_document_to_project',{'document_id':document_id},p,operation_id=operation_id)['project']
+    assert archived['tasks'] == before['tasks']
+    assert archived['documents'][0] == {**before['documents'][0],'task_id':None}
+    assert workspace.document(document_id,project_id=p['id'])[1] == b'draft'
+    assert workspace.client_get(token)['documents'] == ([archived['documents'][0]] if visible else [])
+    if visible: assert workspace.document(document_id,share_token=token)[1] == b'draft'
+    else:
+        with pytest.raises(ProjectError) as error: workspace.document(document_id,share_token=token)
+        assert error.value.status == 404
+    replay = command(workspace,'move_document_to_project',{'document_id':document_id},p,operation_id=operation_id)['project']
+    assert replay == archived and workspace.get(p['id'])['revision'] == archived['revision']
+    for actor in ('hermes-web','carpediev'):
+        with pytest.raises(ProjectError) as error: command(workspace,'move_document_to_project',{'document_id':document_id},p,actor=actor,operation_id=operation_id)
+        assert error.value.status == 403
+    other = command(workspace,'create_project',{'name':'Other'})['project']
+    with pytest.raises(ProjectError): command(workspace,'move_document_to_project',{'document_id':document_id},other)
+    assert workspace.get(other['id']) == other
+    with pytest.raises(ProjectError) as error: command(workspace,'move_document_to_project',{'document_id':document_id},p)
+    assert error.value.status == 409
+
+
+def test_moving_document_cannot_bypass_hidden_parent_task(workspace):
+    p = command(workspace,'create_project',{'name':'Private task','tasks':[{'title':'Hidden','visible':False}]})['project']
+    p = command(workspace,'add_document',{'name':'Hidden.txt','task_id':p['tasks'][0]['id'],'content_base64':'eA==','visible':True},p)['project']
+    result=command(workspace,'create_share',{'label':'Client'},p);p=result['project'];token=result['share']['token']
+    assert workspace.client_get(token)['documents'] == []
+    before=copy.deepcopy(workspace.store.state)
+    with pytest.raises(ProjectError) as error: command(workspace,'move_document_to_project',{'document_id':p['documents'][0]['id']},p)
+    assert error.value.status == 400
+    assert workspace.store.state == before
+    assert workspace.client_get(token)['documents'] == []

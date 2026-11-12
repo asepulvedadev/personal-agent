@@ -202,3 +202,29 @@ actual solution, tests and unresolved task-specific questions. Codec details,
 voice-generation IDs, compositor tools and production/revision logs belong in
 internal production artifacts, not task notes or client-facing comments. Final
 approved evidence videos remain attached to their respective tasks.
+
+## Moving production artifacts out of tasks
+
+Owner-only `move_document_to_project` accepts `{document_id}` with the usual
+project/revision/operation envelope. It clears the task association without
+changing bytes, hash, document ID or existing visibility. Private production
+files remain private; already-approved business documents remain available at
+project level. It is not file deletion and is intentionally absent from the
+Hermes/Carpediev service action enum. Owner authorization precedes operation
+replay. Cross-project IDs and stale revisions are rejected without mutation. Moving a
+visible document from a hidden task is rejected until the owner explicitly makes
+the file internal, because removing its parent guard could otherwise expand access.
+
+The owner UI offers an icon-only **Mover al proyecto** action for task-linked
+files, with a confirmation explaining the preserved file and privacy. For the
+requested G1/D4 delivery, only the completed real-recording MP4 belongs in each
+task; drafts, old montages, audio and technical evidence bundles belong outside
+the task. Business reports can remain in project-level documents.
+
+Validation: 612 Python tests passed (three optional database integration tests
+skipped), all 89 Node tests passed, and independent verification rechecked the
+hidden-parent privacy regression. Initial domain/UI cases and the privacy
+regression were observed failing before their implementations. Secret scanning
+found only the pre-existing synthetic database-error fixture, reviewed as such.
+Risk: items 1, 2 and 5 (stored association, owner authorization and deployment);
+no file deletion, migration, credential or existing download-guard change.
