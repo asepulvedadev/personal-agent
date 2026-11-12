@@ -61,13 +61,13 @@ function mount({client=false,project={},contacts=[],projects=[],failure=null,res
   querySelector(selector){return this.all().find(n=>selector==='input,select,textarea'?['input','select','textarea'].includes(n.tagName):selector.startsWith('.')?String(n.className).split(' ').includes(selector.slice(1)):n.tagName===selector);}
   get elements(){return {namedItem:name=>this.all().find(e=>e.name===name)};}
  }
- const nodes=new Map();const doc={readyState:'complete',createElement:tag=>new Element(tag,doc),querySelector:selector=>{if(!nodes.has(selector))nodes.set(selector,new Element('div',doc));return nodes.get(selector);}};
+ const nodes=new Map();const doc={readyState:'complete',createElement:tag=>new Element(tag,doc),createElementNS:(_,tag)=>new Element(tag,doc),querySelector:selector=>{if(!nodes.has(selector))nodes.set(selector,new Element('div',doc));return nodes.get(selector);}};
  const urls=[],revoked=[];doc.body=new Element('body',doc);
  const calls=[],history=[];doc.activeElement=doc.querySelector('#content');
  const context={document:doc,location:{pathname:client?'/project':'/projects',hash:client?'#bearer-secret':'',origin:'https://private.example'},history:{replaceState:(...a)=>history.push(a)},crypto:require('node:crypto').webcrypto,queueMicrotask,setTimeout,URL:{createObjectURL:blob=>{const url=URL.createObjectURL(blob);urls.push({url,blob});return url;},revokeObjectURL:url=>{revoked.push(url);URL.revokeObjectURL(url);}},Blob,Uint8Array,console,
  fetch:async(path,options)=>{calls.push({path,options});if(responder){const response=responder(path,options);if(response)return response;}if(failure)return {ok:false,status:failure};return {ok:true,json:async()=>path==='/api/me'?{csrf:'owner-csrf'}:path==='/api/projects'?{contacts,projects}:path==='/api/projects/command'?{contact:{id:'new'}}:{project}};}};
  vm.runInNewContext(fs.readFileSync('app/static/projects.js','utf8'),context);
- return {nodes,calls,history,doc,urls,revoked,settle:()=>new Promise(r=>setImmediate(r)),find:(root,label)=>root.all().find(e=>e.tagName==='button'&&e.textContent===label)};
+ return {nodes,calls,history,doc,urls,revoked,settle:()=>new Promise(r=>setImmediate(r)),find:(root,label)=>root.all().find(e=>e.tagName==='button'&&(e.attrs['aria-label']||e.textContent)===label)};
 }
 test('client bootstrap retains fragment for reload, makes no owner requests and renders read-only controls',async()=>{
  const f=mount({client:true,project:{name:'<script>unsafe</script>',status:'active',tasks:[{id:'t',title:'Visible task',status:'todo',priority:'normal',approval:'pending',comments:[],time_entries:[]}],groups:[],documents:[]}});await f.settle();
@@ -179,4 +179,26 @@ test('closing task during video fetch cancels preview without leaking object URL
  let finish;const pending=new Promise(resolve=>finish=resolve);
  const f=mount({client:true,project:videoProject(),responder:path=>path.includes('/documents/')?{ok:true,blob:()=>pending}:null});await f.settle();await f.nodes.get('#content').all().find(e=>e.className==='task').dispatch('click');
  const loading=f.find(f.nodes.get('#dialog-body'),'Ver video').dispatch('click');await f.settle();await f.nodes.get('#dialog-close').dispatch('click');finish(new Blob(['video']));await loading;await f.settle();assert.equal(f.urls.length,0);
+});
+
+test('project actions use only SVG icons with accessible names and titles; video label tracks state',async()=>{
+ const f=mount({client:true,project:videoProject(),responder:path=>path.includes('/documents/')?{ok:true,blob:async()=>new Blob(['bytes'])}:null});await f.settle();
+ const download=f.find(f.nodes.get('#content'),'Descargar');assert.equal(download.textContent,'');assert.equal(download.title,'Descargar');assert.equal(download.attrs['aria-label'],'Descargar');assert.equal(download.querySelector('svg').attrs['aria-hidden'],'true');
+ const close=f.nodes.get('#dialog-close');assert.equal(close.textContent,'');assert.equal(close.attrs['aria-label'],'Cerrar ventana');
+ await f.nodes.get('#content').all().find(e=>e.className==='task').dispatch('click');const body=f.nodes.get('#dialog-body');const toggle=f.find(body,'Ver video');assert.equal(toggle.textContent,'');await toggle.dispatch('click');assert.equal(toggle.textContent,'');assert.equal(toggle.attrs['aria-label'],'Ocultar video');assert.equal(toggle.title,'Ocultar video');await toggle.dispatch('click');assert.equal(toggle.attrs['aria-label'],'Ver video');assert.ok(f.find(body,'Descargar'));
+});
+test('form save remains icon-only through loading and uses an accessible busy state',async()=>{
+ let finish;const pending=new Promise(resolve=>finish=resolve);
+ const f=mount({responder:path=>path==='/api/projects/command'?{ok:true,json:()=>pending}:null});await f.settle();await f.find(f.nodes.get('#content'),'Contactos y clientes').dispatch('click');await f.find(f.nodes.get('#content'),'Nuevo contacto').dispatch('click');
+ const form=f.nodes.get('#dialog-body').querySelector('form');const save=f.find(form,'Guardar cambios');assert.ok(save);assert.equal(save.textContent,'');assert.ok(save.querySelector('svg'));assert.equal(f.find(form,'Cancelar').textContent,'');
+ form.elements.namedItem('name').value='Test';form.elements.namedItem('status').value='contact';const submit=form.dispatch('submit');await f.settle();assert.equal(save.textContent,'');assert.equal(save.attrs['aria-label'],'Guardando…');assert.equal(save.attrs['aria-busy'],'true');assert.equal(save.disabled,true);finish({contact:{id:'new'}});await submit;assert.equal(save.attrs['aria-label'],'Guardar cambios');assert.equal(save.attrs['aria-busy'],'false');
+});
+
+test('project names that match actions remain readable content, not icon buttons',async()=>{
+ const f=mount({projects:[{id:'p',name:'Descargar',status:'active'}]});await f.settle();const project=f.nodes.get('#content').all().find(e=>e.className==='project-open');assert.equal(project.textContent,'Descargar');assert.equal(project.querySelector('svg'),undefined);
+});
+
+test('recent deliverable task titles are content even when matching an action',async()=>{
+ const project=videoProject();project.tasks[0].title='Descargar';project.tasks[0].code='';
+ const f=mount({client:true,project});await f.settle();const recent=f.nodes.get('#content').all().find(e=>e.tagName==='section'&&e.textContent.includes('Entregables recientes'));const entry=recent.all().find(e=>e.tagName==='button');assert.equal(entry.textContent,'Descargar');assert.equal(entry.querySelector('svg'),undefined);
 });

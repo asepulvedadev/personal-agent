@@ -79,7 +79,39 @@
     const content=$('#content'),status=$('#status'),dialog=$('#editor'),dialogBody=$('#dialog-body');
     function el(tag,text,className){const node=document.createElement(tag);if(text!=null)node.textContent=String(text);if(className)node.className=className;return node;}
     function append(parent,...children){children.filter(Boolean).forEach(child=>parent.append(child));return parent;}
-    function button(text,handler,className=''){const b=el('button',text,className);b.type='button';b.addEventListener('click',()=>Promise.resolve().then(handler).catch(showError));return b;}
+    const ICONS={
+      close:'M18 6 6 18M6 6l12 12',download:'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+      play:'m8 5 12 7-12 7V5Z',hide:'m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 4.2A11 11 0 0 1 21 12a16 16 0 0 1-3 4M6.6 6.6A16 16 0 0 0 3 12s3 8 9 8a10 10 0 0 0 5-1.4',
+      plus:'M12 5v14M5 12h14',edit:'m16 3 5 5-12 12-6 1 1-6L16 3ZM14 5l5 5',
+      clock:'M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',stop:'M6 6h12v12H6Z',
+      attach:'m21 11-9 9a6 6 0 0 1-8.5-8.5l10-10a4 4 0 0 1 5.7 5.7L9.1 17.3a2 2 0 0 1-2.8-2.8L15.5 5',
+      message:'M21 15a3 3 0 0 1-3 3H8l-5 4V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9Z',
+      share:'M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM8.5 10.5l7-4M8.5 13.5l7 4',
+      lock:'M6 11h12v10H6V11ZM8 11V7a4 4 0 0 1 8 0v4',
+      settings:'M4 7h16M4 17h16M8 4v6M16 14v6',back:'m12 5-7 7 7 7M5 12h14',
+      list:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',board:'M3 4h5v16H3V4ZM10 4h5v10h-5V4ZM17 4h4v13h-4V4Z',
+      copy:'M9 9h12v12H9V9ZM15 5V3H3v12h2',save:'m5 12 4 4L19 6',refresh:'M20 7v5h-5M4 17v-5h5M5.5 7a8 8 0 0 1 13-2L20 7M4 17l1.5 2a8 8 0 0 0 13-2',
+      busy:'M12 3a9 9 0 1 1-9 9'
+    };
+    const ACTION_ICONS={
+      'Cerrar ventana':'close','Cancelar':'close','Descargar':'download','Ver video':'play','Ocultar video':'hide',
+      'Configurar':'settings','Compartir':'share','Compartir con cliente':'share','Hacer interno':'lock',
+      'Nueva tarea':'plus','Nuevo proyecto':'plus','Nuevo contacto':'plus','Añadir grupo':'plus',
+      'Editar tarea':'edit','Renombrar':'edit','Registrar tiempo':'clock','Iniciar cronómetro':'clock','Detener cronómetro':'stop','Detener y registrar':'stop',
+      'Adjuntar':'attach','Adjuntar documento':'attach','Subir documento':'attach','Escribir':'message','Publicar mensaje':'message',
+      '← Todos los proyectos':'back','Volver a la tarea':'back','Vista de lista':'list','Vista de tablero':'board',
+      'Copiar enlace':'copy','Crear enlace de acceso':'share','Crear enlace':'share','Revocar':'lock','Revocar este acceso':'lock','Revocar enlace':'lock','Ver accesos':'share',
+      'Guardar cambios':'save','Iniciar':'clock','Volver a intentar':'refresh','Recargar datos (descarta este formulario)':'refresh','Guardando…':'busy'
+    };
+    function labelAction(node,label){
+      const name=ACTION_ICONS[label];if(!name){node.textContent=label;return;}
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),path=document.createElementNS('http://www.w3.org/2000/svg','path');
+      for(const [key,value] of Object.entries({viewBox:'0 0 24 24',width:20,height:20,fill:'none',stroke:'currentColor','stroke-width':1.8,'stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))svg.setAttribute(key,value);
+      path.setAttribute('d',ICONS[name]);svg.append(path);node.replaceChildren(svg);node.setAttribute('aria-label',label);node.title=label;
+      if(!String(node.className||'').split(' ').includes('icon-button'))node.className=`${node.className||''} icon-button`.trim();
+      node.setAttribute('aria-busy',name==='busy'?'true':'false');
+    }
+    function button(text,handler,className='',icon=true){const b=el('button',null,className);if(icon)labelAction(b,text);else b.textContent=text;b.type='button';b.addEventListener('click',()=>Promise.resolve().then(handler).catch(showError));return b;}
     function message(text,error=false){status.textContent=text;status.className=`status${error?' error':''}`;}
     function showError(error){const text=error.message||'No se pudo completar la acción.';message(text,true);if(dialog.open){let note=dialogBody.querySelector('.action-error');if(!note){note=el('p','','form-error action-error');note.setAttribute('role','alert');dialogBody.prepend(note);}note.textContent=text;note.tabIndex=-1;note.focus();}}
     function empty(text){return el('div',text,'empty');}
@@ -93,6 +125,7 @@
     globalThis.addEventListener?.('pagehide',()=>releaseMedia());
     function open(title){releaseMedia(dialogBody);if(!dialog.open)returnFocus=document.activeElement;$('#dialog-title').textContent=title;dialogBody.replaceChildren();if(!dialog.open)dialog.showModal();dialog.scrollTop=0;}
     function close(){dialog.close();}
+    labelAction($('#dialog-close'),'Cerrar ventana');
     $('#dialog-close').addEventListener('click',close);
     dialog.addEventListener('close',()=>{releaseMedia(dialogBody);dialogBody.replaceChildren();if(returnFocus?.isConnected)returnFocus.focus();else $('#workspace').focus();});
     $('#owner-nav').hidden=client;$('#client-label').hidden=!client;
@@ -113,14 +146,14 @@
         append(wrap,field.type==='checkbox'?control:label,field.type==='checkbox'?label:control);
         if(field.hint)wrap.append(el('small',field.hint,'hint'));grid.append(wrap);
       }
-      const error=el('p','','form-error');error.setAttribute('role','alert');const save=el('button',submit,'primary');save.type='submit';
+      const error=el('p','','form-error');error.setAttribute('role','alert');const save=el('button',null,'primary');labelAction(save,submit);save.type='submit';
       const cancel=button(back?'Volver a la tarea':'Cancelar',back||close);
       append(f,grid,error,append(el('div',null,'form-footer'),cancel,save));dialogBody.append(f);
       f.addEventListener('submit',async event=>{
-        event.preventDefault();if(save.disabled)return;error.textContent='';save.disabled=true;save.textContent='Guardando…';
+        event.preventDefault();if(save.disabled)return;error.textContent='';save.disabled=true;labelAction(save,'Guardando…');
         try{const values={};for(const field of fields){if(field.heading)continue;const input=f.elements.namedItem(field.name);values[field.name]=field.type==='checkbox'?input.checked:field.type==='file'?input.files[0]:input.value;}await onSave(normalize(values));}
         catch(e){error.textContent=e.message;error.tabIndex=-1;error.focus();if(e.status===409){const reload=button('Recargar datos (descarta este formulario)',async()=>{close();await loadProject(project.id);});error.append(document.createElement('br'),reload);}}
-        finally{save.disabled=false;save.textContent=submit;}
+        finally{save.disabled=false;labelAction(save,submit);}
       });
       queueMicrotask(()=>f.querySelector('input,select,textarea')?.focus());return f;
     }
@@ -140,14 +173,14 @@
       if(tab==='contacts'){renderContacts();return;}
       if(!projects.length){content.append(empty('Aún no hay proyectos. Crea el primero, con o sin cliente vinculado.'));return;}
       const list=el('div',null,'project-list');
-      for(const p of projects){const row=el('article',null,'project-row');append(row,badge(PROJECT_STATES[p.status]||p.status),button(p.name,()=>loadProject(p.id),'project-open'));
+      for(const p of projects){const row=el('article',null,'project-row');append(row,badge(PROJECT_STATES[p.status]||p.status),button(p.name,()=>loadProject(p.id),'project-open',false));
         const clientContact=contacts.find(c=>c.id===p.client_id);append(row,el('p',clientContact?.name||'Sin cliente vinculado','hint'),append(el('div',null,'row-meta'),el('span',`${p.done_count||0} de ${p.task_count||0} tareas`),el('span',(p.time_entry_count||p.tracked_minutes)>0?duration(p.tracked_minutes||0):'Sin horas registradas'),el('span',`Actualizado ${date(p.updated_at)}`)));list.append(row);}
       content.append(list);
     }
     function renderContacts(){
       if(!contacts.length){content.append(empty('Agrega un contacto para comenzar. Los proyectos también pueden existir sin cliente.'));return;}
       const grid=el('div',null,'contact-grid');for(const [state,label] of options(CONTACT_STATES)){const col=el('section',null,'contact-group');col.append(el('h2',label));const items=contacts.filter(c=>c.status===state);if(!items.length)col.append(el('p','Sin contactos en esta etapa.','hint'));
-        for(const c of items){const row=el('article',null,'contact');append(row,button(c.name,()=>contactForm(c),'link'),el('p',c.company||'Sin empresa','hint'),el('p',[c.email,c.phone].filter(Boolean).join(' · '),'hint'),c.notes?el('p',c.notes,'hint'):null);col.append(row);}grid.append(col);}content.append(grid);
+        for(const c of items){const row=el('article',null,'contact');append(row,button(c.name,()=>contactForm(c),'link',false),el('p',c.company||'Sin empresa','hint'),el('p',[c.email,c.phone].filter(Boolean).join(' · '),'hint'),c.notes?el('p',c.notes,'hint'):null);col.append(row);}grid.append(col);}content.append(grid);
     }
     function contactForm(c={}){form(c.id?'Editar contacto':'Nuevo contacto',[
       field('name','Nombre',c.name,'text',{required:true}),choose('status','Etapa',c.status||'contact',options(CONTACT_STATES)),field('email','Correo electrónico',c.email,'email'),field('phone','Teléfono',c.phone,'tel'),field('company','Empresa',c.company),text('notes','Notas privadas',c.notes)
@@ -175,7 +208,7 @@
       if(!(project.groups||[]).length)groupSection.append(el('p','Todavía no hay grupos.','hint'));
       for(const g of project.groups||[]){const tasks=(project.tasks||[]).filter(t=>t.group_id===g.id),s=summary({tasks}),row=el('div',null,'group-row'),body=el('div');append(body,el('h3',g.name),el('small',`${s.done}/${s.total} terminadas · ${s.entryCount?duration(s.minutes):'Sin horas registradas'}`,'hint'));const pg=el('progress');pg.max=100;pg.value=s.percent;pg.setAttribute('aria-label',`${g.name}: ${s.percent}%`);body.append(pg);append(row,body,!client?button('Renombrar',()=>groupForm(g),'link'):null);groupSection.append(row);}
       const docs=section('Documentos privados',!client?button('Adjuntar',()=>documentForm()):null);renderDocuments(docs,project.documents||[]);append(columns,groupSection,docs);content.append(columns);
-      const delivered=section('Entregables recientes');const done=(project.tasks||[]).filter(t=>t.status==='done');if(!done.length)delivered.append(el('p','Las tareas terminadas aparecerán aquí con su resolución y evidencia.','hint'));for(const t of done.slice(-5).reverse())delivered.append(button(`${t.code?t.code+' · ':''}${t.title}`,()=>taskDetails(t.id),'link'));content.append(delivered);
+      const delivered=section('Entregables recientes');const done=(project.tasks||[]).filter(t=>t.status==='done');if(!done.length)delivered.append(el('p','Las tareas terminadas aparecerán aquí con su resolución y evidencia.','hint'));for(const t of done.slice(-5).reverse())delivered.append(button(`${t.code?t.code+' · ':''}${t.title}`,()=>taskDetails(t.id),'link',false));content.append(delivered);
       if(!client&&project.internal_notes){const notes=section('Notas internas');notes.append(el('p',project.internal_notes,'private'));content.append(notes);}
     }
     function renderTasks(area){
@@ -231,7 +264,7 @@
             const current={parent:body,cancelled:false,url:null,video:null,release(){
               this.cancelled=true;if(this.video){this.video.pause();this.video.removeAttribute('src');this.video.load();}
               if(this.url)URL.revokeObjectURL(this.url);mediaViews.delete(this);if(view===this)view=null;
-              player.replaceChildren();notice.textContent='';toggle.textContent='Ver video';toggle.disabled=false;toggle.setAttribute('aria-expanded','false');
+              player.replaceChildren();notice.textContent='';labelAction(toggle,'Ver video');toggle.disabled=false;toggle.setAttribute('aria-expanded','false');
             }};view=current;mediaViews.add(current);
             try{
               // Reuse the authorized download: bearer stays in the header, never in a media URL.
@@ -239,7 +272,7 @@
               current.url=URL.createObjectURL(new Blob([blob],{type:d.media_type}));
               const video=el('video',null,'document-video');current.video=video;video.controls=true;video.preload='metadata';video.playsInline=true;video.src=current.url;video.setAttribute('aria-label',`Video: ${d.name}`);
               video.addEventListener('error',()=>{notice.textContent='No se pudo reproducir este video. Usa Descargar para abrirlo en tu equipo.';});
-              player.append(video);notice.textContent='';toggle.textContent='Ocultar video';toggle.setAttribute('aria-expanded','true');
+              player.append(video);notice.textContent='';labelAction(toggle,'Ocultar video');toggle.setAttribute('aria-expanded','true');
             }catch(error){if(!current.cancelled){current.release();notice.textContent=error.message||'No se pudo cargar el video. Puedes volver a intentarlo.';}}
             finally{toggle.disabled=false;}
           });toggle.setAttribute('aria-expanded','false');controls.prepend(toggle);append(body,player,notice);
